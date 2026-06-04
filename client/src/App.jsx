@@ -8,7 +8,6 @@ import Cart from './pages/Cart'
 import Checkout from './pages/Checkout'
 import MyOrders from './pages/MyOrders'
 import Seller from './pages/Seller'
-import LoginModal from './components/LoginModal'
 import { Toaster } from "react-hot-toast";
 
 const App = () => {
@@ -18,9 +17,6 @@ const App = () => {
     <div>
       {isSellerPath ? null : <Navbar/>}
       
-      {/* Sleek Global Auth Modal */}
-      <LoginModal />
-
       <Toaster/>
 
       <div className={`${isSellerPath ? "" : "px-6 md:px-16 lg:px-24 xl:px-32"}`}>

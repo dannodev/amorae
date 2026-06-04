@@ -2,8 +2,8 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { dummyProducts } from "../assets/assets";
 import toast from "react-hot-toast";
-import { auth } from "../config/firebase";
-import { onAuthStateChanged } from "firebase/auth";
+import { collection, addDoc, doc, getDocs, query, updateDoc, where, serverTimestamp } from "firebase/firestore";
+import { db } from "../config/firebase";
 
 /* eslint-disable react-refresh/only-export-components */
 export const AppContext = createContext();
@@ -13,9 +13,6 @@ export const AppContextProvider = ({ children }) => {
     const currency = import.meta.env.VITE_CURRENCY || "$";
 
     const navigate = useNavigate()
-    const [user, setUser] = useState(null)
-    const [isSeller, setIsSeller] = useState(false)
-    const [showUserLogin, setShowUserLogin] = useState(false)
     const [products, setProducts] = useState([])
     const [searchQuery, setSearchQuery] = useState("")
     const [cartItems, setCartItems] = useState(() => {
@@ -27,6 +24,12 @@ export const AppContextProvider = ({ children }) => {
             return {};
         }
     })
+    const [ordersLoading, setOrdersLoading] = useState(false);
+    const [ordersError, setOrdersError] = useState(null);
+    const firestoreEnabled =
+        Boolean(import.meta.env.VITE_FIREBASE_PROJECT_ID) &&
+        !import.meta.env.VITE_FIREBASE_PROJECT_ID?.startsWith("mock-");
+    const localOrdersKey = "amorae_orders";
 
     // Fetch All Products
     const fetchProducts = async () => {
@@ -88,28 +91,149 @@ export const AppContextProvider = ({ children }) => {
         return totalCount;
     }
 
+    const clearCart = () => {
+        setCartItems({});
+        localStorage.removeItem("amorae_cart");
+    };
+
+    const normalizePhone = (value) => value?.toString().replace(/\D/g, "") || "";
+
+    const readLocalOrders = () => {
+        try {
+            const raw = localStorage.getItem(localOrdersKey);
+            return raw ? JSON.parse(raw) : [];
+        } catch (error) {
+            console.error("Failed to read local orders", error);
+            toast.error("No se pudieron cargar los pedidos locales.");
+            return [];
+        }
+    };
+
+    const writeLocalOrders = (orders) => {
+        localStorage.setItem(localOrdersKey, JSON.stringify(orders));
+    };
+
+    const createLocalOrder = (orderPayload) => {
+        const orders = readLocalOrders();
+        const id = crypto?.randomUUID?.() || `order_${Date.now()}`;
+        const createdAt = new Date().toISOString();
+        const order = { ...orderPayload, id, createdAt };
+        writeLocalOrders([order, ...orders]);
+        return order;
+    };
+
+    const createOrder = async (orderPayload) => {
+        setOrdersError(null);
+        if (!firestoreEnabled) {
+            toast("Firebase no configurado. Guardando pedido localmente.", { icon: "⚠️" });
+            return createLocalOrder(orderPayload);
+        }
+        try {
+            const docRef = await addDoc(collection(db, "orders"), {
+                ...orderPayload,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+            return { ...orderPayload, id: docRef.id, createdAt: new Date().toISOString() };
+        } catch (error) {
+            console.error("Failed to create order", error);
+            toast.error("No se pudo guardar el pedido en línea.");
+            setOrdersError(error);
+            return createLocalOrder(orderPayload);
+        }
+    };
+
+    const fetchOrdersByPhone = async (phone) => {
+        setOrdersLoading(true);
+        setOrdersError(null);
+        const normalizedPhone = normalizePhone(phone);
+        if (!normalizedPhone) {
+            setOrdersLoading(false);
+            return [];
+        }
+        if (!firestoreEnabled) {
+            const orders = readLocalOrders().filter((order) => order.phoneNormalized === normalizedPhone);
+            setOrdersLoading(false);
+            return orders;
+        }
+        try {
+            const ordersQuery = query(
+                collection(db, "orders"),
+                where("phoneNormalized", "==", normalizedPhone)
+            );
+            const snapshot = await getDocs(ordersQuery);
+            const orders = snapshot.docs.map((docSnap) => ({
+                id: docSnap.id,
+                ...docSnap.data(),
+            }));
+            setOrdersLoading(false);
+            return orders;
+        } catch (error) {
+            console.error("Failed to fetch orders", error);
+            toast.error("No se pudieron cargar tus pedidos.");
+            setOrdersError(error);
+            setOrdersLoading(false);
+            return readLocalOrders().filter((order) => order.phoneNormalized === normalizedPhone);
+        }
+    };
+
+    const fetchAllOrders = async () => {
+        setOrdersLoading(true);
+        setOrdersError(null);
+        if (!firestoreEnabled) {
+            const orders = readLocalOrders();
+            setOrdersLoading(false);
+            return orders;
+        }
+        try {
+            const snapshot = await getDocs(collection(db, "orders"));
+            const orders = snapshot.docs.map((docSnap) => ({
+                id: docSnap.id,
+                ...docSnap.data(),
+            }));
+            setOrdersLoading(false);
+            return orders;
+        } catch (error) {
+            console.error("Failed to fetch all orders", error);
+            toast.error("No se pudieron cargar los pedidos.");
+            setOrdersError(error);
+            setOrdersLoading(false);
+            return readLocalOrders();
+        }
+    };
+
+    const updateOrderStatus = async (orderId, status) => {
+        setOrdersError(null);
+        if (!firestoreEnabled) {
+            const orders = readLocalOrders();
+            const updated = orders.map((order) =>
+                order.id === orderId ? { ...order, status, updatedAt: new Date().toISOString() } : order
+            );
+            writeLocalOrders(updated);
+            return;
+        }
+        try {
+            await updateDoc(doc(db, "orders", orderId), {
+                status,
+                updatedAt: serverTimestamp(),
+            });
+        } catch (error) {
+            console.error("Failed to update order status", error);
+            toast.error("No se pudo actualizar el estado.");
+            setOrdersError(error);
+        }
+    };
+
     useEffect(() => {
         fetchProducts()
-
-        // Sync Firebase auth state
-        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-            setUser(firebaseUser);
-            if (firebaseUser) {
-                // If user uses @amorae.com email, give seller privileges
-                setIsSeller(firebaseUser.email?.endsWith("@amorae.com") || false);
-            } else {
-                setIsSeller(false);
-            }
-        });
-
-        return () => unsubscribe();
     }, [])
 
     const value = {
-        navigate, user, setUser, setIsSeller, isSeller,
-        showUserLogin, setShowUserLogin, products, currency, addToCart,
+        navigate, products, currency, addToCart,
         updateCartItem, removeFromCart, cartItems, getCartCount,
-        searchQuery, setSearchQuery
+        searchQuery, setSearchQuery, clearCart,
+        createOrder, fetchOrdersByPhone, fetchAllOrders, updateOrderStatus,
+        ordersLoading, ordersError, normalizePhone
     }
     return <AppContext.Provider value={value}>
         {children}

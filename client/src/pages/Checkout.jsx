@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 
 const Checkout = () => {
   const navigate = useNavigate();
-  const { cartItems, products, currency, getCartCount } = useAppContext();
+  const { cartItems, products, currency, getCartCount, createOrder, clearCart, normalizePhone } = useAppContext();
 
   // Address State
   const [formData, setFormData] = useState({
@@ -29,6 +29,7 @@ const Checkout = () => {
     expiry: "",
     cvv: "",
   });
+  const [submitting, setSubmitting] = useState(false);
 
   const cartProducts = products.filter((p) => cartItems[p._id] > 0);
   const total = cartProducts.reduce((sum, p) => sum + p.offerPrice * cartItems[p._id], 0);
@@ -55,7 +56,7 @@ const Checkout = () => {
     setCardData({ ...cardData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     // Validation
@@ -64,48 +65,93 @@ const Checkout = () => {
       return;
     }
 
+    if (submitting) return;
+
     if (paymentMethod === "stripe") {
       if (!cardData.number || !cardData.name || !cardData.expiry || !cardData.cvv) {
         toast.error("Por favor ingresa todos los campos de tu tarjeta");
         return;
       }
-      toast.loading("Procesando pago con Stripe...");
-      setTimeout(() => {
-        toast.dismiss();
-        toast.success("¡Pago exitoso con Stripe!");
-        // Mock success routing
-        navigate("/my-orders");
-      }, 2000);
-    } else {
-      // WhatsApp ordering integration
-      // WhatsApp Mexico phone number (change this to your contact number)
-      const whatsappNumber = "523312345678"; 
-      
-      let message = `*¡Hola Amorae! 🥐🍰*\n`;
-      message += `Quiero finalizar mi pedido con los siguientes productos:\n\n`;
-
-      cartProducts.forEach((p) => {
-        const qty = cartItems[p._id];
-        message += `• *${qty}x* ${p.name} - $${p.offerPrice * qty} MXN\n`;
-      });
-
-      message += `\n*Total a pagar:* $${total} MXN\n\n`;
-      message += `*Datos de Entrega (Guadalajara, Jal):*\n`;
-      message += `• *Cliente:* ${formData.firstName} ${formData.lastName}\n`;
-      message += `• *Dirección:* ${formData.street}, Col. ${formData.colonia}\n`;
-      message += `• *C.P.:* ${formData.zipcode}\n`;
-      message += `• *Teléfono:* ${formData.phone}\n`;
-      message += `• *Notas:* ${formData.notes || "Ninguna"}\n\n`;
-      message += `¿Me confirman disponibilidad y datos de pago? ¡Gracias! ✨`;
-
-      const whatsappURL = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-      
-      toast.success("Redirigiendo a WhatsApp...");
-      setTimeout(() => {
-        window.open(whatsappURL, "_blank");
-        navigate("/my-orders");
-      }, 1000);
     }
+
+    setSubmitting(true);
+    toast.loading(paymentMethod === "stripe" ? "Procesando pago con Stripe..." : "Registrando pedido...");
+
+    const normalizedPhone = normalizePhone(formData.phone);
+    const orderPayload = {
+      status: "Recibido",
+      isPaid: paymentMethod === "stripe",
+      amount: total,
+      phone: formData.phone,
+      phoneNormalized: normalizedPhone,
+      paymentMethod,
+      customer: {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+      },
+      address: {
+        street: formData.street,
+        colonia: formData.colonia,
+        zipcode: formData.zipcode,
+        city: formData.city,
+        state: formData.state,
+        notes: formData.notes,
+      },
+      items: cartProducts.map((product) => ({
+        productId: product._id,
+        name: product.name,
+        category: product.category,
+        image: product.image?.[0],
+        offerPrice: product.offerPrice,
+        quantity: cartItems[product._id],
+      })),
+    };
+
+    const order = await createOrder(orderPayload);
+    localStorage.setItem("amorae_last_phone", normalizedPhone);
+    clearCart();
+
+    toast.dismiss();
+
+    if (paymentMethod === "stripe") {
+      toast.success("¡Pago exitoso con Stripe!");
+      navigate("/my-orders");
+      setSubmitting(false);
+      return;
+    }
+
+    // WhatsApp ordering integration
+    const whatsappNumber = import.meta.env.VITE_WHATSAPP_BUSINESS_NUMBER || "523312345678";
+    let message = `*¡Hola Amorae! 🥐🍰*\n`;
+    message += `Quiero finalizar mi pedido con los siguientes productos:\n\n`;
+
+    cartProducts.forEach((p) => {
+      const qty = cartItems[p._id];
+      message += `• *${qty}x* ${p.name} - $${p.offerPrice * qty} MXN\n`;
+    });
+
+    message += `\n*Total a pagar:* $${total} MXN\n\n`;
+    message += `*Datos de Entrega (Guadalajara, Jal):*\n`;
+    message += `• *Cliente:* ${formData.firstName} ${formData.lastName}\n`;
+    message += `• *Dirección:* ${formData.street}, Col. ${formData.colonia}\n`;
+    message += `• *C.P.:* ${formData.zipcode}\n`;
+    message += `• *Teléfono:* ${formData.phone}\n`;
+    message += `• *Notas:* ${formData.notes || "Ninguna"}\n`;
+    if (order?.id) {
+      message += `• *ID de Pedido:* ${order.id}\n`;
+    }
+    message += `\n¿Me confirman disponibilidad y datos de pago? ¡Gracias! ✨`;
+
+    const whatsappURL = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+
+    toast.success("Redirigiendo a WhatsApp...");
+    setTimeout(() => {
+      window.open(whatsappURL, "_blank");
+      navigate("/my-orders");
+      setSubmitting(false);
+    }, 1000);
   };
 
   return (
@@ -236,6 +282,9 @@ const Checkout = () => {
                   placeholder="3312345678"
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Usaremos este número para enviarte actualizaciones de tu pedido por WhatsApp.
+                </p>
               </div>
 
               <div>
@@ -371,6 +420,7 @@ const Checkout = () => {
             {/* Final Action Button */}
             <button
               onClick={handleSubmit}
+              disabled={submitting}
               className={`w-full py-4 text-center text-white font-medium rounded-xl shadow-md transition-all cursor-pointer ${
                 paymentMethod === "stripe"
                   ? "bg-primary hover:bg-primary-dull hover:shadow-lg"

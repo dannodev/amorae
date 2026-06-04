@@ -1,11 +1,14 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import { assets, categories as originalCategories } from "../assets/assets";
 import toast from "react-hot-toast";
 
 const Seller = () => {
-  const { products, currency } = useAppContext();
+  const { products, currency, fetchAllOrders, updateOrderStatus, normalizePhone } = useAppContext();
   const [activeTab, setActiveTab] = useState("add-product"); // 'add-product', 'list-products', 'orders'
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
   
   // Add Product Form State
   const [newProduct, setNewProduct] = useState({
@@ -42,6 +45,38 @@ const Seller = () => {
       description3: "",
     });
     setImageFile(null);
+  };
+
+  const formatWhatsAppPhone = (phone) => {
+    const digits = normalizePhone(phone);
+    if (!digits) return "";
+    if (digits.length === 10) return `52${digits}`;
+    return digits;
+  };
+
+  const buildStatusMessage = (order) => {
+    const statusText = order?.status || "Recibido";
+    return `Hola ${order?.customer?.firstName || ""}, tu pedido ${order?.id || ""} está: ${statusText}. ¡Gracias por comprar en Amorae!`;
+  };
+
+  const loadOrders = useCallback(async () => {
+    setOrdersLoading(true);
+    const data = await fetchAllOrders();
+    setOrders(data);
+    setOrdersLoading(false);
+    setOrdersLoaded(true);
+  }, [fetchAllOrders]);
+
+  useEffect(() => {
+    if (activeTab === "orders" && !ordersLoaded) {
+      loadOrders();
+    }
+  }, [activeTab, ordersLoaded, loadOrders]);
+
+  const handleStatusChange = async (orderId, status) => {
+    await updateOrderStatus(orderId, status);
+    setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, status } : order)));
+    toast.success(`Estado actualizado a: ${status}`);
   };
 
   return (
@@ -252,67 +287,70 @@ const Seller = () => {
           <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
             <h2 className="text-2xl font-semibold text-gray-800 mb-6">Pedidos Recibidos</h2>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-gray-200 text-xs text-gray-400 uppercase font-semibold">
-                    <th className="pb-3">ID Pedido</th>
-                    <th className="pb-3">Cliente</th>
-                    <th className="pb-3">Dirección (Gdl, Jal)</th>
-                    <th className="pb-3">Monto</th>
-                    <th className="pb-3">Estado</th>
-                    <th className="pb-3 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 text-sm">
-                  <tr className="hover:bg-gray-50 transition-colors">
-                    <td className="py-4 font-medium text-gray-700">67e2589a8f87e63366786400</td>
-                    <td className="py-4">Juan Pérez</td>
-                    <td className="py-4 truncate max-w-xs">Av. Vallarta 1234, Americana</td>
-                    <td className="py-4 font-semibold text-primary-dull">{currency}$280</td>
-                    <td className="py-4">
-                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                        Recibido
-                      </span>
-                    </td>
-                    <td className="py-4 text-right">
-                      <select
-                        onChange={(e) => toast.success(`Estado actualizado a: ${e.target.value}`)}
-                        className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs bg-white cursor-pointer outline-none focus:ring-1 focus:ring-primary"
-                      >
-                        <option value="Placed">Recibido</option>
-                        <option value="Preparing">Preparando</option>
-                        <option value="Delivery">En camino</option>
-                        <option value="Delivered">Entregado</option>
-                      </select>
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-gray-50 transition-colors">
-                    <td className="py-4 font-medium text-gray-700">67e258798f87e633667863f2</td>
-                    <td className="py-4">María Gómez</td>
-                    <td className="py-4 truncate max-w-xs">Av. Chapultepec 89, Moderna</td>
-                    <td className="py-4 font-semibold text-primary-dull">{currency}$125</td>
-                    <td className="py-4">
-                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
-                        Entregado
-                      </span>
-                    </td>
-                    <td className="py-4 text-right">
-                      <select
-                        defaultValue="Delivered"
-                        onChange={(e) => toast.success(`Estado actualizado a: ${e.target.value}`)}
-                        className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs bg-white cursor-pointer outline-none focus:ring-1 focus:ring-primary"
-                      >
-                        <option value="Placed">Recibido</option>
-                        <option value="Preparing">Preparando</option>
-                        <option value="Delivery">En camino</option>
-                        <option value="Delivered">Entregado</option>
-                      </select>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            {ordersLoading ? (
+              <div className="text-center py-10 text-gray-500">Cargando pedidos...</div>
+            ) : orders.length === 0 ? (
+              <div className="text-center py-10 text-gray-500">Aún no hay pedidos registrados.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-xs text-gray-400 uppercase font-semibold">
+                      <th className="pb-3">ID Pedido</th>
+                      <th className="pb-3">Cliente</th>
+                      <th className="pb-3">Dirección (Gdl, Jal)</th>
+                      <th className="pb-3">Monto</th>
+                      <th className="pb-3">Estado</th>
+                      <th className="pb-3 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-sm">
+                    {orders.map((order) => {
+                      const whatsappPhone = formatWhatsAppPhone(order?.phone || order?.customer?.phone);
+                      const whatsappMessage = buildStatusMessage(order);
+                      const whatsappUrl = whatsappPhone
+                        ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(whatsappMessage)}`
+                        : null;
+                      return (
+                        <tr key={order.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="py-4 font-medium text-gray-700">{order.id}</td>
+                          <td className="py-4">{order.customer?.firstName} {order.customer?.lastName}</td>
+                          <td className="py-4 truncate max-w-xs">{order.address?.street}, {order.address?.colonia}</td>
+                          <td className="py-4 font-semibold text-primary-dull">{currency}${order.amount}</td>
+                          <td className="py-4">
+                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                              {order.status || "Recibido"}
+                            </span>
+                          </td>
+                          <td className="py-4 text-right space-x-2">
+                            <select
+                              value={order.status || "Recibido"}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                              className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs bg-white cursor-pointer outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              <option value="Recibido">Recibido</option>
+                              <option value="Preparando">Preparando</option>
+                              <option value="En Camino">En camino</option>
+                              <option value="Entregado">Entregado</option>
+                            </select>
+                            {whatsappUrl && (
+                              <a
+                                href={whatsappUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center px-2.5 py-1.5 border border-green-500 text-green-600 rounded-lg text-xs font-semibold hover:bg-green-50"
+                              >
+                                WhatsApp
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </main>
