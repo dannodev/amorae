@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { useAppContext } from "../context/AppContext";
+import { useEffect, useState } from "react";
+import { useAppContext } from "../context/useAppContext";
 import toast from "react-hot-toast";
 
 const MyOrders = () => {
@@ -49,6 +49,18 @@ const MyOrders = () => {
     return "Pendiente";
   };
 
+  const formatDistance = (distanceKm) => {
+    const value = Number(distanceKm);
+    if (!Number.isFinite(value)) return null;
+    return `${value.toLocaleString("es-MX", { maximumFractionDigits: 2 })} km`;
+  };
+
+  const formatFee = (feeMxn, currencySymbol) => {
+    const value = Number(feeMxn);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return `${currencySymbol}${value.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN`;
+  };
+
   const sortOrders = (list) =>
     [...list].sort((a, b) => {
       const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
@@ -69,40 +81,51 @@ const MyOrders = () => {
   };
 
   useEffect(() => {
+    let active = true;
     const lastPhone = localStorage.getItem("amorae_last_phone");
     if (lastPhone) {
       setPhone(lastPhone);
       fetchOrdersByPhone(lastPhone).then((result) => {
+        if (!active) return;
         setOrders(sortOrders(result));
         setHasSearched(true);
       });
     }
-  }, [fetchOrdersByPhone]);
+    return () => {
+      active = false;
+    };
+    // Auto-load the last searched phone only once when the page opens. The
+    // context function is recreated as loading state changes, so depending on it
+    // can trigger repeated fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <div className="mt-8 mb-20 animate-fade-in">
-      <h1 className="text-3xl font-semibold text-gray-800 mb-4">Mis Pedidos</h1>
+    <div className="customer-flow mb-20 mt-10 animate-fade-in">
+      <span className="section-kicker">Del horno a tu mesa</span>
+      <h1 className="section-title mb-3">Sigue tu pedido</h1>
+      <p className="mb-8 max-w-xl text-sm leading-6 text-stone-500">Consulta el avance de tus postres con el teléfono que registraste al ordenar.</p>
 
-      <div className="bg-white border border-gray-150 rounded-2xl p-6 shadow-sm mb-8">
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">Consulta tu pedido</h2>
+      <div className="glass-card mb-8 rounded-[1.75rem] p-6 md:p-8">
+        <h2 className="font-display mb-2 text-xl font-bold text-cocoa">Encuentra tu orden</h2>
         <p className="text-sm text-gray-500 mb-4">
           Ingresa el teléfono que usaste en la compra para ver el estado de tus pedidos.
         </p>
-        <div className="flex flex-col sm:flex-row gap-3">
+        <form onSubmit={(e) => { e.preventDefault(); handleSearch(); }} className="flex flex-col sm:flex-row gap-3">
           <input
             type="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             placeholder="Ej. 3312345678"
-            className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
+            className="flex-1 rounded-full px-5 py-3 outline-none"
           />
           <button
-            onClick={handleSearch}
-            className="px-6 py-2.5 bg-primary hover:bg-primary-dull text-white rounded-lg font-medium cursor-pointer"
+            type="submit"
+            className="btn-primary cursor-pointer px-7 py-3"
           >
             Buscar pedidos
           </button>
-        </div>
+        </form>
       </div>
 
       {ordersLoading ? (
@@ -112,7 +135,7 @@ const MyOrders = () => {
           {orders.map((order) => (
             <div
               key={order.id || order._id}
-              className="border border-gray-150 rounded-2xl bg-white p-6 shadow-sm overflow-hidden"
+              className="glass-card overflow-hidden rounded-[1.75rem] p-6 transition hover:-translate-y-0.5"
             >
               {/* Order Header */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-100 gap-4 mb-4">
@@ -148,7 +171,7 @@ const MyOrders = () => {
                       </p>
                     </div>
                     <p className="text-sm font-semibold text-gray-700">
-                      {currency}${(item.product?.offerPrice || item.offerPrice) * item.quantity}
+                      {currency}{(item.product?.offerPrice || item.offerPrice) * item.quantity}
                     </p>
                   </div>
                 ))}
@@ -161,11 +184,23 @@ const MyOrders = () => {
                   <p className="mt-1">
                     <strong>Entrega en:</strong> {order.address?.street}, Guadalajara, Jal.
                   </p>
+                  {(() => {
+                    const distance = formatDistance(order.deliveryDistanceKm ?? order.address?.distanceKm);
+                    const fee = formatFee(order.deliveryFee, currency);
+                    if (!distance && !fee) return null;
+                    return (
+                      <p className="mt-1">
+                        <strong>Envío:</strong>{" "}
+                        {fee ? <span className="font-semibold text-cocoa">{fee}</span> : <span className="text-green-700 font-semibold">Gratis</span>}
+                        {distance && <span className="text-gray-500"> · {distance}</span>}
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div className="text-right w-full sm:w-auto">
                   <span className="text-xs text-gray-400">Total de Orden</span>
                   <p className="text-xl font-bold text-primary-dull">
-                    {currency}${order.amount}
+                    {currency}{(Number(order.amount || 0) + Number(order.deliveryFee || 0)).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
               </div>
@@ -173,11 +208,11 @@ const MyOrders = () => {
           ))}
         </div>
       ) : hasSearched ? (
-        <div className="text-center py-20 bg-gray-50 border border-dashed border-gray-300 rounded-2xl">
+        <div className="rounded-[2rem] border border-dashed border-primary-dull/20 bg-white/40 py-20 text-center">
           <p className="text-gray-500 text-lg">No tienes órdenes anteriores registradas.</p>
         </div>
       ) : (
-        <div className="text-center py-20 bg-gray-50 border border-dashed border-gray-300 rounded-2xl">
+        <div className="rounded-[2rem] border border-dashed border-primary-dull/20 bg-white/40 py-20 text-center">
           <p className="text-gray-500 text-lg">Ingresa tu teléfono para ver tus pedidos.</p>
         </div>
       )}

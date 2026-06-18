@@ -1,6 +1,5 @@
-import React from "react";
 import { useNavigate } from "react-router-dom";
-import { useAppContext } from "../context/AppContext";
+import { useAppContext } from "../context/useAppContext";
 import { assets } from "../assets/assets";
 
 const Cart = () => {
@@ -18,7 +17,7 @@ const Cart = () => {
 
   if (cartProducts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
+      <div className="glass-card my-12 flex flex-col items-center justify-center rounded-[2.5rem] py-24 text-center">
         <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
           <img src={assets.brown_cart} alt="cart icon" className="w-10 opacity-70" />
         </div>
@@ -26,7 +25,7 @@ const Cart = () => {
         <p className="text-gray-500 mb-8 max-w-sm">¡Parece que aún no has agregado ningún postre delicioso a tu orden!</p>
         <button
           onClick={() => navigate("/products")}
-          className="px-8 py-3 bg-primary hover:bg-primary-dull text-white font-medium rounded-xl transition-all shadow-md cursor-pointer"
+          className="btn-primary cursor-pointer px-8 py-3"
         >
           Explorar Productos
         </button>
@@ -35,8 +34,9 @@ const Cart = () => {
   }
 
   return (
-    <div className="mt-8 mb-20 animate-fade-in">
-      <h1 className="text-3xl font-semibold text-gray-800 mb-8">Tu Carrito de Postres</h1>
+    <div className="mb-20 mt-10 animate-fade-in">
+      <span className="section-kicker">Tu selección</span>
+      <h1 className="section-title mb-9">Una caja llena de antojos</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         {/* Left Side: Cart Items List */}
@@ -46,14 +46,14 @@ const Cart = () => {
             return (
               <div
                 key={product._id}
-                className="flex items-center gap-4 p-4 bg-white border border-gray-150 rounded-xl shadow-sm hover:shadow-md transition-shadow"
+                className="glass-card flex items-center gap-4 rounded-2xl p-4 transition hover:-translate-y-0.5 hover:shadow-lg"
               >
                 {/* Product Image */}
                 <div
-                  className="w-20 h-20 bg-gray-50 rounded-lg p-2 flex items-center justify-center cursor-pointer flex-shrink-0"
+                  className="flex h-20 w-20 flex-shrink-0 cursor-pointer items-center justify-center rounded-xl bg-[#f5e8d7] p-2"
                   onClick={() => navigate(`/product/${product._id}`)}
                 >
-                  <img src={product.image[0]} alt={product.name} className="max-h-full max-w-full object-contain" />
+                  <img src={product.image?.[0]} alt={product.name} className="max-h-full max-w-full object-contain" />
                 </div>
 
                 {/* Product Info */}
@@ -66,8 +66,13 @@ const Cart = () => {
                   </h3>
                   <p className="text-sm text-gray-500">{product.category}</p>
                   <p className="text-primary-dull font-semibold mt-1">
-                    {currency}${product.offerPrice} <span className="text-xs text-gray-400 font-normal">c/u</span>
+                    {currency}{product.offerPrice} <span className="text-xs text-gray-400 font-normal">c/u</span>
                   </p>
+                  {product.trackInventory && qty > product.stockQuantity && (
+                    <p className="mt-1 text-xs font-semibold text-red-600">
+                      Solo quedan {product.stockQuantity}. Ajusta la cantidad.
+                    </p>
+                  )}
                 </div>
 
                 {/* Quantity Controls */}
@@ -102,27 +107,29 @@ const Cart = () => {
         </div>
 
         {/* Right Side: Order Summary */}
-        <div className="bg-white border border-gray-150 rounded-xl p-6 shadow-sm h-fit">
-          <h2 className="text-xl font-semibold text-gray-800 mb-6">Resumen de Orden</h2>
+        <div className="glass-card h-fit rounded-[1.75rem] p-6 lg:sticky lg:top-24">
+          <h2 className="font-display mb-6 text-2xl font-bold text-cocoa">Resumen de orden</h2>
 
           <div className="space-y-4">
             <div className="flex justify-between text-gray-600">
               <span>Subtotal</span>
               <span className="font-medium text-gray-800">
-                {currency}${subtotal}
+                {currency}{subtotal}
               </span>
             </div>
 
             <div className="flex justify-between text-gray-600">
               <span>Envío (Guadalajara, Jal.)</span>
-              <span className="text-green-600 font-medium">¡Gratis!</span>
+              <span className="text-stone-500 font-medium text-right text-xs sm:text-sm">
+                Calculado en checkout
+              </span>
             </div>
 
             <div className="border-t border-gray-150 pt-4 my-2">
               <div className="flex justify-between text-lg font-semibold text-gray-800">
                 <span>Total</span>
                 <span className="text-primary-dull">
-                  {currency}${subtotal}
+                  {currency}{subtotal}
                 </span>
               </div>
             </div>
@@ -130,7 +137,7 @@ const Cart = () => {
 
           <button
             onClick={() => navigate("/checkout")}
-            className="w-full py-3.5 mt-8 bg-primary hover:bg-primary-dull text-white font-medium rounded-xl transition-all shadow-md hover:shadow-lg text-center block cursor-pointer"
+            className="btn-primary mt-8 block w-full cursor-pointer py-3.5 text-center"
           >
             Proceder al Pago
           </button>

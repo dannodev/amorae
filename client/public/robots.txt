@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /seller
+Disallow: /checkout
+Disallow: /cart
+Disallow: /my-orders
+
+Sitemap: https://amorae.mx/sitemap.xml

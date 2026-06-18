@@ -1,43 +1,180 @@
-import React, { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAppContext } from "../context/AppContext";
+import { useAppContext } from "../context/useAppContext";
 import toast from "react-hot-toast";
+import DeliveryMapPicker from "../components/DeliveryMapPicker";
+import {
+  computeQuote,
+  formatFee,
+  getStoreConfig,
+  getWhatsAppNumber,
+  lookupPostalCode,
+} from "../lib/delivery";
+
+const DEBOUNCE_MS = 700;
+const DELIVERY_AREA_LABEL = "Guadalajara, Jalisco y zona metropolitana";
+const DELIVERY_AREA_WARNING =
+  "Por ahora solo entregamos en Guadalajara, Jalisco y zona metropolitana.";
+
+const buildAddressQuery = (form) => ({
+  street: form.street,
+  colonia: form.colonia,
+  zipcode: form.zipcode,
+  city: form.city,
+  state: form.state,
+});
 
 const Checkout = () => {
   const navigate = useNavigate();
-  const { cartItems, products, currency, getCartCount, createOrder, clearCart, normalizePhone } = useAppContext();
+  const {
+    cartItems,
+    products,
+    currency,
+    getCartCount,
+    createOrder,
+    clearCart,
+    normalizePhone,
+  } = useAppContext();
+  const {
+    storeCoordinates,
+    freeOrderMinMxn,
+    freeOrderMaxKm,
+  } = getStoreConfig();
 
-  // Address State
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
-    email: "",
     street: "",
     colonia: "",
     zipcode: "",
     phone: "",
     notes: "",
-    // Hardcoded and disabled for delivery limitation
+    preferredDate: "",
+    preferredTime: "",
     state: "Jalisco",
     city: "Guadalajara",
   });
 
-  const [paymentMethod, setPaymentMethod] = useState("stripe"); // 'stripe' or 'whatsapp'
-  const [cardData, setCardData] = useState({
-    number: "",
-    name: "",
-    expiry: "",
-    cvv: "",
-  });
   const [submitting, setSubmitting] = useState(false);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quote, setQuote] = useState(null);
+  const [postalLookupLoading, setPostalLookupLoading] = useState(false);
+  const [postalOptions, setPostalOptions] = useState([]);
+  const [postalLookupError, setPostalLookupError] = useState("");
+  const [postalDeliveryStatus, setPostalDeliveryStatus] = useState({
+    checked: false,
+    allowed: true,
+    message: "",
+  });
+  const [selectedDeliveryLocation, setSelectedDeliveryLocation] = useState(null);
+  const [addressAutofillNotice, setAddressAutofillNotice] = useState("");
+  const debounceRef = useRef(null);
+  const postalDebounceRef = useRef(null);
+  const lastQueriedRef = useRef("");
 
   const cartProducts = products.filter((p) => cartItems[p._id] > 0);
-  const total = cartProducts.reduce((sum, p) => sum + p.offerPrice * cartItems[p._id], 0);
+  const subtotal = cartProducts.reduce(
+    (sum, p) => sum + p.offerPrice * cartItems[p._id],
+    0
+  );
+  const deliveryFee = quote?.status === "ok" ? Math.ceil(quote.feeMxn) : 0;
+  const deliveryStatus = quoteLoading ? "loading" : quote?.status || "idle";
+  const total = Math.ceil(subtotal + deliveryFee);
+  const isPostalOutOfArea = postalDeliveryStatus.checked && !postalDeliveryStatus.allowed;
+  const freeDeliveryRemaining = Math.max(0, Number(freeOrderMinMxn || 0) - subtotal);
+  const hasFreeDeliveryPromo = Number(freeOrderMinMxn || 0) > 0 && subtotal >= Number(freeOrderMinMxn || 0);
+
+  const buildDeliveryInput = (form = formData) => buildAddressQuery(form);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const query = buildDeliveryInput();
+    const isComplete =
+      formData.zipcode.trim().length === 5 &&
+      formData.street.trim().length >= 4 &&
+      formData.colonia.trim().length >= 2;
+    if (!isComplete) {
+      setQuote(null);
+      return undefined;
+    }
+    const signature = JSON.stringify({ ...query, subtotal });
+    if (signature === lastQueriedRef.current) return undefined;
+    debounceRef.current = setTimeout(async () => {
+      setQuoteLoading(true);
+      try {
+        const next = await computeQuote(query, subtotal);
+        lastQueriedRef.current = signature;
+        setQuote(next);
+      } catch (error) {
+        console.error("Delivery quote failed", error);
+        setQuote({ status: "error", message: "No pudimos calcular el envío." });
+      } finally {
+        setQuoteLoading(false);
+      }
+    }, DEBOUNCE_MS);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+    // formData is the canonical source for the address snapshot above; we intentionally
+    // depend on the individual fields to avoid re-running the effect for unrelated inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.street, formData.colonia, formData.zipcode, formData.city, formData.state, subtotal]);
+
+  useEffect(() => {
+    if (postalDebounceRef.current) clearTimeout(postalDebounceRef.current);
+    const postalCode = formData.zipcode.replace(/\D/g, "");
+    if (postalCode.length !== 5) {
+      setPostalOptions([]);
+      setPostalLookupError("");
+      setPostalDeliveryStatus({ checked: false, allowed: true, message: "" });
+      setPostalLookupLoading(false);
+      return undefined;
+    }
+
+    postalDebounceRef.current = setTimeout(async () => {
+      setPostalLookupLoading(true);
+      setPostalLookupError("");
+      try {
+        const result = await lookupPostalCode(postalCode);
+        const places = result?.places || [];
+        const deliveryAvailable = result?.deliveryAvailable !== false;
+        setPostalOptions(deliveryAvailable ? places : []);
+        setPostalDeliveryStatus({
+          checked: true,
+          allowed: deliveryAvailable,
+          message: deliveryAvailable ? "" : result?.serviceAreaMessage || DELIVERY_AREA_WARNING,
+        });
+        if (result?.state) {
+          setFormData((current) => ({
+            ...current,
+            state: result.state,
+            city: result.primaryMunicipality || current.city || "Guadalajara",
+            colonia: deliveryAvailable ? current.colonia : "",
+          }));
+        }
+        if (!deliveryAvailable) {
+          setPostalLookupError(result?.serviceAreaMessage || DELIVERY_AREA_WARNING);
+        } else if (!places.length) {
+          setPostalLookupError("No encontramos colonias para este código postal.");
+        }
+      } catch (error) {
+        console.error("Postal code lookup failed", error);
+        setPostalLookupError("No pudimos consultar las colonias. Puedes escribirla manualmente.");
+        setPostalDeliveryStatus({ checked: true, allowed: false, message: DELIVERY_AREA_WARNING });
+      } finally {
+        setPostalLookupLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      if (postalDebounceRef.current) clearTimeout(postalDebounceRef.current);
+    };
+  }, [formData.zipcode]);
 
   if (cartProducts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">No hay productos en tu carrito</h2>
+        <h2 className="text-xl font-semibold text-gray-800 mb-4">Tu carrito está vacío</h2>
         <button
           onClick={() => navigate("/products")}
           className="px-6 py-2 bg-primary text-white rounded-lg cursor-pointer"
@@ -49,46 +186,96 @@ const Checkout = () => {
   }
 
   const handleInputChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === "zipcode") {
+      const zipcode = value.replace(/\D/g, "").slice(0, 5);
+      setFormData((current) => ({
+        ...current,
+        zipcode,
+        colonia: zipcode === current.zipcode ? current.colonia : "",
+      }));
+      if (zipcode !== formData.zipcode) {
+        setSelectedDeliveryLocation(null);
+      }
+      return;
+    }
+    setFormData({ ...formData, [name]: value });
   };
 
-  const handleCardChange = (e) => {
-    setCardData({ ...cardData, [e.target.name]: e.target.value });
+  const handleMapSelect = async (location) => {
+    lastQueriedRef.current = "";
+    setSelectedDeliveryLocation(location);
+    if (!location) {
+      setAddressAutofillNotice("");
+      return;
+    }
+
+    setAddressAutofillNotice("Pin guardado para ayudarnos a ubicar la entrega. La dirección escrita sigue siendo la referencia principal.");
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validation
-    if (!formData.firstName || !formData.lastName || !formData.street || !formData.colonia || !formData.phone) {
+    if (!formData.firstName || !formData.lastName || !formData.street || !formData.colonia || !formData.zipcode || !formData.phone) {
       toast.error("Por favor completa los campos de dirección requeridos");
+      return;
+    }
+
+    if (formData.zipcode.replace(/\D/g, "").length !== 5 || isPostalOutOfArea) {
+      toast.error(DELIVERY_AREA_WARNING);
       return;
     }
 
     if (submitting) return;
 
-    if (paymentMethod === "stripe") {
-      if (!cardData.number || !cardData.name || !cardData.expiry || !cardData.cvv) {
-        toast.error("Por favor ingresa todos los campos de tu tarjeta");
-        return;
+    const unavailableProduct = cartProducts.find((product) =>
+      !product.inStock ||
+      (product.trackInventory && cartItems[product._id] > product.stockQuantity)
+    );
+    if (unavailableProduct) {
+      toast.error(`Revisa la disponibilidad de ${unavailableProduct.name}`);
+      return;
+    }
+
+    const normalizedPhone = normalizePhone(formData.phone);
+    if (normalizedPhone.length < 10 || normalizedPhone.length > 15) {
+      toast.error("Ingresa un teléfono válido de 10 a 15 dígitos");
+      return;
+    }
+
+    let activeQuote = quote;
+    if (!activeQuote || activeQuote.status === "idle" || activeQuote.status === "loading") {
+      try {
+        setQuoteLoading(true);
+        activeQuote = await computeQuote(buildDeliveryInput(formData), subtotal);
+        setQuote(activeQuote);
+        lastQueriedRef.current = JSON.stringify({ ...buildDeliveryInput(formData), subtotal });
+      } catch (error) {
+        console.error("Delivery quote failed at submit", error);
+        activeQuote = { status: "error", feeMxn: 0, distanceKm: null };
+      } finally {
+        setQuoteLoading(false);
       }
     }
 
-    setSubmitting(true);
-    toast.loading(paymentMethod === "stripe" ? "Procesando pago con Stripe..." : "Registrando pedido...");
+    const finalFee = activeQuote?.status === "ok" ? Math.ceil(activeQuote.feeMxn) : 0;
+    const finalDistance = Number.isFinite(activeQuote?.distanceKm) ? activeQuote.distanceKm : null;
 
-    const normalizedPhone = normalizePhone(formData.phone);
+    setSubmitting(true);
+    toast.loading("Registrando pedido...");
     const orderPayload = {
       status: "Recibido",
-      isPaid: paymentMethod === "stripe",
-      amount: total,
+      isPaid: false,
+      amount: subtotal,
+      deliveryFee: finalFee,
+      deliveryDistanceKm: finalDistance,
+      deliveryStatus: activeQuote?.status || "unresolved",
       phone: formData.phone,
       phoneNormalized: normalizedPhone,
-      paymentMethod,
+      paymentMethod: "whatsapp",
       customer: {
         firstName: formData.firstName,
         lastName: formData.lastName,
-        email: formData.email,
         phone: formData.phone,
       },
       address: {
@@ -98,45 +285,61 @@ const Checkout = () => {
         city: formData.city,
         state: formData.state,
         notes: formData.notes,
+        distanceKm: finalDistance,
+        deliveryCoordinates: selectedDeliveryLocation,
+        preferredDate: formData.preferredDate,
+        preferredTime: formData.preferredTime,
       },
       items: cartProducts.map((product) => ({
         productId: product._id,
         name: product.name,
         category: product.category,
-        image: product.image?.[0],
+        image: Array.isArray(product.image) ? product.image[0] : undefined,
         offerPrice: product.offerPrice,
         quantity: cartItems[product._id],
       })),
     };
 
-    const order = await createOrder(orderPayload);
+    let order;
+    try {
+      order = await createOrder(orderPayload);
+    } catch (error) {
+      toast.dismiss();
+      toast.error(error?.message || "No se pudo registrar el pedido");
+      setSubmitting(false);
+      return;
+    }
     localStorage.setItem("amorae_last_phone", normalizedPhone);
     clearCart();
 
     toast.dismiss();
 
-    if (paymentMethod === "stripe") {
-      toast.success("¡Pago exitoso con Stripe!");
-      navigate("/my-orders");
-      setSubmitting(false);
-      return;
-    }
-
-    // WhatsApp ordering integration
-    const whatsappNumber = import.meta.env.VITE_WHATSAPP_BUSINESS_NUMBER || "523312345678";
+    const whatsappNumber = getWhatsAppNumber();
     let message = `*¡Hola Amorae! 🥐🍰*\n`;
     message += `Quiero finalizar mi pedido con los siguientes productos:\n\n`;
 
     cartProducts.forEach((p) => {
       const qty = cartItems[p._id];
-      message += `• *${qty}x* ${p.name} - $${p.offerPrice * qty} MXN\n`;
+      message += `• *${qty}x* ${p.name} - ${currency}${p.offerPrice * qty} MXN\n`;
     });
 
-    message += `\n*Total a pagar:* $${total} MXN\n\n`;
+    message += `\n*Subtotal:* ${currency}${subtotal} MXN`;
+    if (finalFee > 0) {
+      message += `\n*Envío:* ${formatFee(finalFee)}`;
+    } else if (Number.isFinite(finalDistance)) {
+      message += `\n*Envío:* Gratis`;
+    } else {
+      message += `\n*Envío:* A confirmar según tu dirección`;
+    }
+    message += `\n*Total a pagar:* ${currency}${Math.ceil(subtotal + finalFee)} MXN\n\n`;
     message += `*Datos de Entrega (Guadalajara, Jal):*\n`;
     message += `• *Cliente:* ${formData.firstName} ${formData.lastName}\n`;
     message += `• *Dirección:* ${formData.street}, Col. ${formData.colonia}\n`;
     message += `• *C.P.:* ${formData.zipcode}\n`;
+    message += `• *Entrega preferida:* ${formData.preferredDate || "Por confirmar"} ${formData.preferredTime || ""}\n`;
+    if (selectedDeliveryLocation) {
+      message += `• *Pin de entrega:* ${selectedDeliveryLocation.lat.toFixed(5)}, ${selectedDeliveryLocation.lon.toFixed(5)}\n`;
+    }
     message += `• *Teléfono:* ${formData.phone}\n`;
     message += `• *Notas:* ${formData.notes || "Ninguna"}\n`;
     if (order?.id) {
@@ -146,31 +349,39 @@ const Checkout = () => {
 
     const whatsappURL = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 
-    toast.success("Redirigiendo a WhatsApp...");
-    setTimeout(() => {
-      window.open(whatsappURL, "_blank");
-      navigate("/my-orders");
-      setSubmitting(false);
-    }, 1000);
+    toast.success("Pedido registrado");
+    navigate("/order-confirmation", {
+      state: {
+        orderId: order?.id,
+        items: orderPayload.items,
+        total: Math.ceil(subtotal + finalFee),
+        deliveryWindow: {
+          date: formData.preferredDate,
+          time: formData.preferredTime,
+        },
+        whatsappUrl: whatsappURL,
+      },
+    });
   };
 
   return (
-    <div className="mt-8 mb-20 animate-fade-in">
-      <h1 className="text-3xl font-semibold text-gray-800 mb-8">Información de tu Pedido</h1>
+    <div className="customer-flow mb-20 mt-10 animate-fade-in">
+      <span className="section-kicker">Último paso</span>
+      <h1 className="section-title mb-3">Preparemos tu entrega</h1>
+      <p className="mb-9 max-w-xl text-sm leading-6 text-stone-500">
+        Confirma tus datos y nosotros nos encargamos de que todo llegue fresco y precioso.
+      </p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-        {/* Left Form: Shipping Address */}
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-10">
         <div className="space-y-6">
-          <div className="bg-white border border-gray-150 rounded-2xl p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-gray-800 mb-6">Detalles de Entrega</h2>
-            
-            {/* Limit Warning banner */}
-            <div className="mb-6 p-4 bg-orange-50 border-l-4 border-primary-dull text-primary-dull rounded-r-lg text-sm font-medium">
-              📍 <strong>Atención:</strong> Las entregas están estrictamente limitadas a <strong>Guadalajara, Jalisco</strong>.
+          <div className="glass-card rounded-[1.75rem] p-6 md:p-8">
+            <h2 className="font-display mb-6 text-2xl font-bold text-cocoa">Detalles de entrega</h2>
+            <div className="mb-5 rounded-2xl border border-[#74866b]/20 bg-[#eef2e9] px-4 py-3 text-sm leading-6 text-green-800">
+              Solo realizamos entregas dentro de {DELIVERY_AREA_LABEL}. Verificaremos tu código postal antes de confirmar el pedido.
             </div>
 
-            <form className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Nombre *</label>
                   <input
@@ -197,17 +408,66 @@ const Checkout = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico</label>
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="juan@ejemplo.com"
-                />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Código Postal *</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    name="zipcode"
+                    value={formData.zipcode}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="44824"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    {postalLookupLoading
+                      ? "Buscando colonias..."
+                      : isPostalOutOfArea
+                        ? postalDeliveryStatus.message || DELIVERY_AREA_WARNING
+                      : postalLookupError && !formData.colonia
+                        ? postalLookupError
+                        : formData.colonia
+                          ? "Colonia/zona lista; puedes corregirla si es necesario."
+                          : postalOptions.length
+                            ? "Selecciona tu colonia de la lista."
+                          : "Primero ingresa tu CP para elegir colonia."}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Colonia o zona *</label>
+                  {postalOptions.length > 0 ? (
+                    <select
+                      name="colonia"
+                      value={formData.colonia}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
+                      required
+                    >
+                      <option value="">Selecciona tu colonia</option>
+                      {postalOptions.map((place, index) => (
+                        <option key={`${place.name}-${index}`} value={place.name}>{place.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      name="colonia"
+                      value={formData.colonia}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="Villas del Nilo"
+                      required
+                    />
+                  )}
+                </div>
               </div>
+              {isPostalOutOfArea && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                  {postalDeliveryStatus.message || DELIVERY_AREA_WARNING} Si tu dirección está dentro de la zona metropolitana, revisa que el código postal esté escrito correctamente.
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Calle y Número *</label>
@@ -222,33 +482,7 @@ const Checkout = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Colonia *</label>
-                  <input
-                    type="text"
-                    name="colonia"
-                    value={formData.colonia}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Americana"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Código Postal</label>
-                  <input
-                    type="text"
-                    name="zipcode"
-                    value={formData.zipcode}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="44160"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Ciudad</label>
                   <input
@@ -287,6 +521,33 @@ const Checkout = () => {
                 </p>
               </div>
 
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha preferida</label>
+                  <input
+                    type="date"
+                    name="preferredDate"
+                    value={formData.preferredDate}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Horario preferido</label>
+                  <select
+                    name="preferredTime"
+                    value={formData.preferredTime}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">Por confirmar</option>
+                    <option value="10:00 - 13:00">10:00 - 13:00</option>
+                    <option value="13:00 - 16:00">13:00 - 16:00</option>
+                    <option value="16:00 - 19:00">16:00 - 19:00</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notas especiales para la entrega</label>
                 <textarea
@@ -297,141 +558,86 @@ const Checkout = () => {
                   placeholder="Ej. Tocar el timbre morado, dejar en recepción..."
                 ></textarea>
               </div>
-            </form>
+
+              <div className="space-y-3 rounded-[1.5rem] border border-primary-dull/10 bg-[#fffaf2] p-4">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-[.16em] text-primary-dull">Pin opcional</span>
+                  <h3 className="font-display mt-1 text-xl font-bold text-cocoa">Ayúdanos a ubicarte en el mapa</h3>
+                  <p className="mt-1 text-xs leading-5 text-stone-500">
+                    Después de escribir tu dirección, puedes marcar tu ubicación aproximada. Lo usaremos solo como apoyo para encontrar el lugar de entrega.
+                  </p>
+                </div>
+                <DeliveryMapPicker
+                  origin={storeCoordinates}
+                  estimatedLocation={quote?.destination}
+                  selectedLocation={selectedDeliveryLocation}
+                  onSelect={handleMapSelect}
+                />
+                <p className="text-xs font-medium text-primary-dull">
+                  {selectedDeliveryLocation
+                    ? addressAutofillNotice || "Pin guardado como referencia."
+                    : "Puedes dejarlo vacío si tu dirección escrita es suficiente."}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Right Info: Select Payment + Payment details */}
         <div className="space-y-6">
-          <div className="bg-white border border-gray-150 rounded-2xl p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-gray-800 mb-6">Método de Finalización</h2>
+          <div className="glass-card rounded-[1.75rem] p-6 md:sticky md:top-24 md:p-8">
+            <h2 className="font-display mb-6 text-2xl font-bold text-cocoa">Finalizar pedido</h2>
 
-            {/* Payment Method Selector Buttons */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("stripe")}
-                className={`py-4 px-4 border rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${
-                  paymentMethod === "stripe"
-                    ? "border-primary bg-primary/5 text-primary-dull shadow-sm"
-                    : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                }`}
-              >
-                <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
-                </svg>
-                <span className="text-sm font-semibold">Stripe / Tarjeta</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("whatsapp")}
-                className={`py-4 px-4 border rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${
-                  paymentMethod === "whatsapp"
-                    ? "border-green-500 bg-green-500/5 text-green-700 shadow-sm"
-                    : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                }`}
-              >
-                <svg className="w-8 h-8 text-green-500" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0012.04 2zm5.88 14.15c-.24.67-1.39 1.29-1.9 1.34-.47.05-.93.26-2.99-.59-2.63-1.08-4.32-3.75-4.45-3.92-.13-.17-1.07-1.42-1.07-2.72 0-1.29.68-1.93.92-2.19.24-.26.52-.32.69-.32.17 0 .35.01.5.02.16.01.37-.06.58.44.22.52.75 1.83.82 1.96.07.13.11.29.02.48-.09.18-.13.29-.26.45-.13.16-.27.35-.38.47-.13.13-.26.27-.11.53.15.26.66 1.09 1.41 1.76.97.86 1.79 1.13 2.05 1.26.26.13.41.11.57-.07.16-.18.68-.79.86-1.06.18-.27.37-.23.63-.13.26.1.1.84 1.64.67.75.33 1.12.5.96.63-.16.14-.3.29-.44.42z" />
-                </svg>
-                <span className="text-sm font-semibold">WhatsApp</span>
-              </button>
+            <div className="space-y-3 rounded-2xl border border-[#74866b]/20 bg-[#eef2e9] p-5">
+              <h3 className="text-sm font-semibold text-green-800">Entrega vía WhatsApp</h3>
+              <p className="text-sm text-green-700/80 leading-relaxed">
+                Al completar tu pedido, se abrirá un chat directo de WhatsApp con nosotros con los detalles del carrito y tu dirección de entrega. Ahí podremos coordinar el pago y la fecha de entrega directamente.
+              </p>
             </div>
 
-            {/* Dynamic Content based on method */}
-            {paymentMethod === "stripe" ? (
-              <div className="space-y-4 border border-gray-150 rounded-xl p-4 bg-gray-50">
-                <h3 className="text-sm font-semibold text-gray-700">Información de Tarjeta (Stripe)</h3>
-                
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Nombre en la tarjeta</label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={cardData.name}
-                    onChange={handleCardChange}
-                    className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none text-sm focus:ring-1 focus:ring-primary"
-                    placeholder="TITULAR DE LA TARJETA"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Número de tarjeta</label>
-                  <input
-                    type="text"
-                    name="number"
-                    value={cardData.number}
-                    onChange={handleCardChange}
-                    className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none text-sm focus:ring-1 focus:ring-primary"
-                    placeholder="4000 1234 5678 9010"
-                    maxLength="19"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Vencimiento</label>
-                    <input
-                      type="text"
-                      name="expiry"
-                      value={cardData.expiry}
-                      onChange={handleCardChange}
-                      className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none text-sm focus:ring-1 focus:ring-primary"
-                      placeholder="MM/AA"
-                      maxLength="5"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">CVV</label>
-                    <input
-                      type="password"
-                      name="cvv"
-                      value={cardData.cvv}
-                      onChange={handleCardChange}
-                      className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none text-sm focus:ring-1 focus:ring-primary"
-                      placeholder="123"
-                      maxLength="4"
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="p-4 border border-green-200 rounded-xl bg-green-50/50 space-y-3">
-                <h3 className="text-sm font-semibold text-green-800">Finalizar orden vía WhatsApp</h3>
-                <p className="text-sm text-green-700/80 leading-relaxed">
-                  Al completar tu pedido, se abrirá un chat directo de WhatsApp con nosotros, con tu mensaje pre-llenado que contiene los detalles del carrito y tu dirección de entrega en Guadalajara. ¡Ahí podremos coordinar el pago y aclarar tus dudas directamente!
-                </p>
-              </div>
-            )}
-
-            {/* Total Summary */}
             <div className="border-t border-gray-200 my-6 pt-4 space-y-2">
               <div className="flex justify-between text-gray-600">
                 <span>Subtotal ({getCartCount()} pz)</span>
-                <span>{currency}${total}</span>
+                <span>{currency}{subtotal}</span>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <span>Envío</span>
+                <span className={deliveryFee > 0 ? "text-gray-800 font-medium" : "text-green-600 font-medium"}>
+                  {deliveryStatus === "ok"
+                    ? deliveryFee > 0
+                      ? formatFee(deliveryFee)
+                      : "¡Gratis!"
+                    : deliveryStatus === "loading"
+                      ? "Calculando…"
+                      : "Por confirmar"}
+                </span>
               </div>
               <div className="flex justify-between font-semibold text-lg text-gray-800">
                 <span>Total a Pagar</span>
-                <span className="text-primary-dull">{currency}${total}</span>
+                <span className="text-primary-dull">{currency}{total}</span>
               </div>
+              {Number(freeOrderMinMxn || 0) > 0 && (
+                <div className={`rounded-2xl px-4 py-3 text-xs font-semibold leading-5 ${
+                  hasFreeDeliveryPromo
+                    ? "bg-green-50 text-green-800"
+                    : "bg-[#fff5dd] text-primary-dull"
+                }`}>
+                  {hasFreeDeliveryPromo
+                    ? `Tu compra califica para envío gratis hasta ${freeOrderMaxKm} km.`
+                    : `Agrega ${currency}${Math.ceil(freeDeliveryRemaining)} más para envío gratis hasta ${freeOrderMaxKm} km.`}
+                </div>
+              )}
             </div>
 
-            {/* Final Action Button */}
             <button
-              onClick={handleSubmit}
-              disabled={submitting}
-              className={`w-full py-4 text-center text-white font-medium rounded-xl shadow-md transition-all cursor-pointer ${
-                paymentMethod === "stripe"
-                  ? "bg-primary hover:bg-primary-dull hover:shadow-lg"
-                  : "bg-green-600 hover:bg-green-700 hover:shadow-lg"
-              }`}
+              type="submit"
+              disabled={submitting || isPostalOutOfArea}
+              className="w-full cursor-pointer rounded-full bg-[#4f6f52] py-4 text-center font-bold text-white shadow-lg transition-all hover:-translate-y-0.5 hover:bg-[#3f5d42] hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {paymentMethod === "stripe" ? "Pagar con Stripe" : "Enviar Pedido por WhatsApp 💬"}
+              {submitting ? "Registrando..." : "Revisar y confirmar pedido"}
             </button>
           </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 };
