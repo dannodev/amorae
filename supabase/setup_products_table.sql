@@ -124,6 +124,9 @@ BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Authentication required';
   END IF;
+  IF quantity_delta = 0 OR abs(quantity_delta) > 1000000 THEN
+    RAISE EXCEPTION 'Invalid inventory adjustment';
+  END IF;
 
   SELECT stock_quantity INTO previous_quantity
   FROM inventory
@@ -140,7 +143,7 @@ BEGIN
       updated_at = NOW();
 
   INSERT INTO inventory_movements (product_id, quantity_change, reason)
-  VALUES (target_product_id, resulting_quantity - previous_quantity, movement_reason);
+  VALUES (target_product_id, resulting_quantity - previous_quantity, left(COALESCE(movement_reason, 'Ajuste manual'), 200));
 
   RETURN resulting_quantity;
 END;

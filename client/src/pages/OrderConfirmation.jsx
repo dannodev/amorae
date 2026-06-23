@@ -6,10 +6,12 @@ const OrderConfirmation = () => {
   const navigate = useNavigate();
   const data = location.state;
 
-  const items = data?.items || [];
-  const total = Number(data?.total || 0);
-  const whatsappUrl = data?.whatsappUrl || "";
+  const items = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
+  const numericTotal = Number(data?.total);
+  const total = Number.isFinite(numericTotal) && numericTotal >= 0 ? numericTotal : 0;
+  const whatsappUrl = typeof data?.whatsappUrl === "string" && data.whatsappUrl.startsWith("https://wa.me/") ? data.whatsappUrl : "";
   const deliveryWindow = data?.deliveryWindow;
+  const isPickup = data?.fulfillmentType === "pickup";
 
   const deliveryText = useMemo(() => {
     if (!deliveryWindow?.date) return "Por confirmar";
@@ -42,11 +44,16 @@ const OrderConfirmation = () => {
           ))}
         </div>
         <div className="mt-5 grid gap-3 rounded-2xl bg-[#fbf6ef] p-4 text-sm">
-          <div className="flex justify-between"><span>Entrega preferida</span><strong>{deliveryText}</strong></div>
+          <div className="flex justify-between"><span>{isPickup ? "Recolección preferida" : "Entrega preferida"}</span><strong>{deliveryText}</strong></div>
+          {isPickup && <div className="flex justify-between"><span>Punto de recolección</span><strong>{data.pickupLocation}</strong></div>}
           <div className="flex justify-between"><span>Total estimado</span><strong>${total} MXN</strong></div>
           <div className="flex justify-between"><span>ID</span><strong className="font-mono text-xs">{data.orderId}</strong></div>
         </div>
-        <a href={whatsappUrl} className="btn-primary mt-6 flex w-full py-3">Confirmar por WhatsApp</a>
+        {whatsappUrl ? (
+          <a href={whatsappUrl} className="btn-primary mt-6 flex w-full py-3">Confirmar por WhatsApp</a>
+        ) : (
+          <p className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-center text-sm text-amber-800">No pudimos preparar el enlace de WhatsApp. Consulta tu pedido con el teléfono registrado.</p>
+        )}
         <Link to="/my-orders" className="mt-3 block text-center text-sm font-bold text-primary-dull">Consultar mis pedidos</Link>
       </div>
     </section>

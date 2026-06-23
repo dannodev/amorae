@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppContext } from "../context/useAppContext";
 import toast from "react-hot-toast";
 
@@ -7,6 +7,7 @@ const MyOrders = () => {
   const [orders, setOrders] = useState([]);
   const [phone, setPhone] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
+  const searchRequestRef = useRef(0);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -19,6 +20,8 @@ const MyOrders = () => {
       case "Out for Delivery":
       case "En Camino":
         return "bg-orange-100 text-orange-800";
+      case "Listo para recoger":
+        return "bg-purple-100 text-purple-800";
       case "Delivered":
       case "Entregado":
         return "bg-green-100 text-green-800";
@@ -44,7 +47,10 @@ const MyOrders = () => {
 
   const getOrderDate = (createdAt) => {
     if (!createdAt) return "Pendiente";
-    if (typeof createdAt === "string") return new Date(createdAt).toLocaleDateString("es-MX");
+    if (typeof createdAt === "string") {
+      const date = new Date(createdAt);
+      return Number.isNaN(date.getTime()) ? "Pendiente" : date.toLocaleDateString("es-MX");
+    }
     if (createdAt?.toDate) return createdAt.toDate().toLocaleDateString("es-MX");
     return "Pendiente";
   };
@@ -62,7 +68,7 @@ const MyOrders = () => {
   };
 
   const sortOrders = (list) =>
-    [...list].sort((a, b) => {
+    (Array.isArray(list) ? [...list] : []).filter(Boolean).sort((a, b) => {
       const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
       const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
       return bDate - aDate;
@@ -70,14 +76,17 @@ const MyOrders = () => {
 
   const handleSearch = async () => {
     const normalizedPhone = normalizePhone(phone);
-    if (!normalizedPhone) {
-      toast.error("Ingresa un teléfono válido");
+    if (normalizedPhone.length < 10 || normalizedPhone.length > 15) {
+      toast.error("Ingresa un teléfono válido de 10 a 15 dígitos");
       return;
     }
-    localStorage.setItem("amorae_last_phone", normalizedPhone);
+    try { localStorage.setItem("amorae_last_phone", normalizedPhone); } catch { /* optional convenience */ }
+    const requestId = ++searchRequestRef.current;
     const result = await fetchOrdersByPhone(normalizedPhone);
-    setOrders(sortOrders(result));
-    setHasSearched(true);
+    if (requestId === searchRequestRef.current) {
+      setOrders(sortOrders(result));
+      setHasSearched(true);
+    }
   };
 
   useEffect(() => {
@@ -85,8 +94,9 @@ const MyOrders = () => {
     const lastPhone = localStorage.getItem("amorae_last_phone");
     if (lastPhone) {
       setPhone(lastPhone);
+      const requestId = ++searchRequestRef.current;
       fetchOrdersByPhone(lastPhone).then((result) => {
-        if (!active) return;
+        if (!active || requestId !== searchRequestRef.current) return;
         setOrders(sortOrders(result));
         setHasSearched(true);
       });
@@ -155,11 +165,13 @@ const MyOrders = () => {
 
               {/* Order Items */}
               <div className="space-y-4 mb-6">
-                {order.items.map((item, idx) => (
+                {(Array.isArray(order.items) ? order.items : []).map((item, idx) => (
                   <div key={idx} className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg p-1 flex items-center justify-center flex-shrink-0">
                       <img
-                        src={item.product?.image?.[0] || item.image}
+                        loading="lazy"
+                        decoding="async"
+                        src={item.product?.image?.[0] || item.image || "/circle_logo.png"}
                         alt={item.product?.name || item.name}
                         className="max-h-full max-w-full object-contain"
                       />
@@ -182,9 +194,10 @@ const MyOrders = () => {
                 <div className="text-xs text-gray-500">
                   <p><strong>Fecha:</strong> {getOrderDate(order.createdAt)}</p>
                   <p className="mt-1">
-                    <strong>Entrega en:</strong> {order.address?.street}, Guadalajara, Jal.
+                    <strong>{(order.fulfillmentType === "pickup" || order.address?.fulfillmentType === "pickup") ? "Recolección en:" : "Entrega en:"}</strong>{" "}
+                    {(order.fulfillmentType === "pickup" || order.address?.fulfillmentType === "pickup") ? (order.pickupLocation || order.address?.pickupLocation) : `${order.address?.street}, ${order.address?.colonia}, ${order.address?.city || "Guadalajara"}, Jal.`}
                   </p>
-                  {(() => {
+                  {order.fulfillmentType !== "pickup" && order.address?.fulfillmentType !== "pickup" && (() => {
                     const distance = formatDistance(order.deliveryDistanceKm ?? order.address?.distanceKm);
                     const fee = formatFee(order.deliveryFee, currency);
                     if (!distance && !fee) return null;

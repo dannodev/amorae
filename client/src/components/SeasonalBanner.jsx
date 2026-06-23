@@ -19,9 +19,9 @@ const SeasonalBanner = () => (
       </div>
       <div className="relative h-64">
         <div className="absolute inset-6 rounded-full bg-white/30 blur-xl" />
-        <img src={assets.brownie_image} alt="" className="float-slow absolute left-4 top-8 w-36 drop-shadow-xl" />
-        <img src={assets.rol_image} alt="" className="float-delayed absolute bottom-2 right-6 w-40 drop-shadow-xl" />
-        <img src={assets.tiramisu_image} alt="" className="float-slow absolute right-24 top-10 w-28 rotate-6 drop-shadow-xl" />
+        <img loading="lazy" decoding="async" src={assets.brownie_image} alt="" className="float-slow absolute left-4 top-8 w-36 drop-shadow-xl" />
+        <img loading="lazy" decoding="async" src={assets.rol_image} alt="" className="float-delayed absolute bottom-2 right-6 w-40 drop-shadow-xl" />
+        <img loading="lazy" decoding="async" src={assets.tiramisu_image} alt="" className="float-slow absolute right-24 top-10 w-28 rotate-6 drop-shadow-xl" />
       </div>
     </div>
   </section>

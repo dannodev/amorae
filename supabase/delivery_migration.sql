@@ -6,10 +6,22 @@
 -- This migration is idempotent and safe to re-run.
 
 ALTER TABLE public.orders
-  ADD COLUMN IF NOT EXISTS delivery_fee NUMERIC NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0),
+  ADD COLUMN IF NOT EXISTS delivery_fee NUMERIC NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0 AND delivery_fee <= 1000000),
   ADD COLUMN IF NOT EXISTS delivery_distance_km NUMERIC,
   ADD COLUMN IF NOT EXISTS delivery_status TEXT,
   ADD COLUMN IF NOT EXISTS delivery_notes TEXT;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orders_status_allowed') THEN
+    ALTER TABLE public.orders ADD CONSTRAINT orders_status_allowed
+      CHECK (status IN ('Recibido', 'Preparando', 'En Camino', 'Listo para recoger', 'Entregado')) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orders_delivery_fee_bounds') THEN
+    ALTER TABLE public.orders ADD CONSTRAINT orders_delivery_fee_bounds
+      CHECK (delivery_fee >= 0 AND delivery_fee <= 1000000) NOT VALID;
+  END IF;
+END $$;
 
 -- Optional: backfill the new top-level columns from any historical orders that
 -- already store the fee inside the address JSONB. This is best-effort; rows
@@ -57,12 +69,57 @@ DECLARE
   order_delivery_distance NUMERIC := NULL;
   catalog_price NUMERIC;
 BEGIN
+  IF order_payload IS NULL OR jsonb_typeof(order_payload) <> 'object'
+    OR jsonb_typeof(COALESCE(order_payload->'customer', '{}'::jsonb)) <> 'object'
+    OR jsonb_typeof(COALESCE(order_payload->'address', '{}'::jsonb)) <> 'object' THEN
+    RAISE EXCEPTION 'Order payload must contain customer and address objects';
+  END IF;
+  IF jsonb_typeof(COALESCE(order_payload->'items', '[]'::jsonb)) <> 'array' THEN
+    RAISE EXCEPTION 'Order items must be an array';
+  END IF;
   IF jsonb_array_length(COALESCE(order_payload->'items', '[]'::jsonb)) = 0 THEN
     RAISE EXCEPTION 'Order must contain at least one item';
   END IF;
+  IF jsonb_array_length(order_payload->'items') > 50 THEN
+    RAISE EXCEPTION 'Order contains too many items';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(order_payload->'items') item(value)
+    GROUP BY item.value->>'productId' HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Order contains duplicate products';
+  END IF;
+  IF length(COALESCE(order_payload->'customer'->>'firstName', '')) > 80
+    OR length(COALESCE(order_payload->'customer'->>'lastName', '')) > 100
+    OR length(COALESCE(order_payload->'address'->>'notes', '')) > 500 THEN
+    RAISE EXCEPTION 'Order contact data is too long';
+  END IF;
+  IF btrim(COALESCE(order_payload->'customer'->>'firstName', '')) = ''
+    OR btrim(COALESCE(order_payload->'customer'->>'lastName', '')) = ''
+    OR length(COALESCE(order_payload->'address'->>'street', '')) > 200
+    OR length(COALESCE(order_payload->'address'->>'colonia', '')) > 120
+    OR length(COALESCE(order_payload->'address'->>'city', '')) > 100
+    OR length(COALESCE(order_payload->'address'->>'state', '')) > 100
+    OR length(COALESCE(order_payload->'deliveryStatus', '')) > 40
+    OR length(COALESCE(order_payload->'deliveryNotes', '')) > 200 THEN
+    RAISE EXCEPTION 'Order data is missing or too long';
+  END IF;
+  IF COALESCE(order_payload->'address'->>'fulfillmentType', 'delivery') NOT IN ('delivery', 'pickup') THEN
+    RAISE EXCEPTION 'Invalid fulfillment type';
+  END IF;
+  IF order_payload->'address'->>'fulfillmentType' = 'pickup'
+    AND COALESCE(order_payload->'address'->>'pickupLocation', '') NOT IN ('Tossa Residencial', 'Río Nilo', 'Venta presencial') THEN
+    RAISE EXCEPTION 'Invalid pickup location';
+  END IF;
+  IF auth.uid() IS NULL AND order_payload->'address'->>'pickupLocation' = 'Venta presencial' THEN
+    RAISE EXCEPTION 'Invalid public pickup location';
+  END IF;
 
-  normalized_phone := regexp_replace(order_payload->>'phoneNormalized', '\D', '', 'g');
-  IF length(normalized_phone) < 10 THEN
+  normalized_phone := CASE
+    WHEN auth.uid() IS NULL THEN regexp_replace(order_payload->'customer'->>'phone', '\D', '', 'g')
+    ELSE regexp_replace(COALESCE(order_payload->>'phoneNormalized', order_payload->'customer'->>'phone'), '\D', '', 'g')
+  END;
+  IF length(normalized_phone) < 10 OR length(normalized_phone) > 15 THEN
     RAISE EXCEPTION 'A valid customer phone is required';
   END IF;
 
@@ -70,7 +127,11 @@ BEGIN
   LOOP
     IF COALESCE(order_item->>'productId', '') = ''
       OR COALESCE(order_item->>'name', '') = ''
-      OR COALESCE((order_item->>'quantity')::INTEGER, 0) <= 0 THEN
+      OR length(COALESCE(order_item->>'name', '')) > 120
+      OR length(COALESCE(order_item->>'category', '')) > 80
+      OR length(COALESCE(order_item->>'image', '')) > 1000
+      OR COALESCE((order_item->>'quantity')::INTEGER, 0) <= 0
+      OR COALESCE((order_item->>'quantity')::INTEGER, 0) > 999 THEN
       RAISE EXCEPTION 'Every order item requires a product, name, and positive quantity';
     END IF;
 
@@ -155,7 +216,7 @@ BEGIN
   -- and mirrored into address for back-compat with any code that still reads
   -- it from there.
   BEGIN
-    order_delivery_fee := GREATEST(0, COALESCE((order_payload->>'deliveryFee')::NUMERIC, 0));
+    order_delivery_fee := LEAST(1000000, GREATEST(0, COALESCE((order_payload->>'deliveryFee')::NUMERIC, 0)));
   EXCEPTION WHEN OTHERS THEN
     order_delivery_fee := 0;
   END;

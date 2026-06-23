@@ -28,7 +28,7 @@ DECLARE
   next_unit_cost NUMERIC;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
-  IF quantity_added <= 0 OR purchase_cost < 0 THEN RAISE EXCEPTION 'Invalid purchase values'; END IF;
+  IF quantity_added <= 0 OR quantity_added > 1000000000 OR purchase_cost < 0 OR purchase_cost > 1000000000 THEN RAISE EXCEPTION 'Invalid purchase values'; END IF;
 
   SELECT * INTO current_material FROM public.raw_materials
   WHERE id = target_material_id FOR UPDATE;
@@ -50,10 +50,10 @@ BEGIN
   VALUES (
     target_material_id,
     quantity_added,
-    movement_reason,
+    left(COALESCE(movement_reason, 'Compra'), 200),
     purchase_cost / quantity_added,
-    COALESCE(supplier_name, ''),
-    COALESCE(batch_code, '')
+    left(COALESCE(supplier_name, ''), 160),
+    left(COALESCE(batch_code, ''), 120)
   );
 
   RETURN current_material;

@@ -8,6 +8,7 @@ const MainBanner = () => {
         src={assets.main_banner_bg}
         alt=""
         fetchPriority="high"
+        decoding="async"
         className="absolute inset-0 h-full w-full object-cover object-center opacity-55"
       />
       <div className="absolute inset-0 bg-[linear-gradient(100deg,rgba(255,248,237,0.98)_0%,rgba(255,244,227,0.88)_47%,rgba(87,44,28,0.04)_75%)]" />
@@ -40,9 +41,9 @@ const MainBanner = () => {
           <div className="absolute bottom-[-8rem] right-[-4rem] h-[340px] w-[340px] rounded-full bg-[radial-gradient(circle_at_35%_30%,#fff7e8,#d59a63_72%)] shadow-[inset_-30px_-35px_60px_rgba(101,50,26,0.18),0_30px_70px_rgba(94,48,27,0.22)] sm:right-[2%] md:bottom-[-5rem] md:right-[-8%] md:h-[450px] md:w-[450px]" />
           <div className="absolute bottom-8 right-[8%] h-12 w-[60%] rounded-[50%] bg-cocoa/25 blur-xl md:bottom-16 md:right-[1%]" />
 
-          <img src={assets.brownie_image} alt="Brownie artesanal" className="float-slow absolute bottom-12 right-[6%] z-20 w-36 drop-shadow-[0_30px_22px_rgba(55,25,15,0.34)] sm:right-[18%] sm:w-44 md:bottom-[25%] md:right-[12%] md:w-60 lg:w-68" />
-          <img src={assets.rol_image} alt="Rol de canela" className="float-delayed absolute bottom-3 right-[54%] z-10 w-28 -rotate-12 drop-shadow-[0_24px_18px_rgba(55,25,15,0.28)] sm:right-[55%] sm:w-32 md:bottom-[8%] md:right-[59%] md:w-40" />
-          <img src={assets.tiramisu_image} alt="Tiramisú artesanal" className="float-slow absolute bottom-3 right-[31%] z-30 w-24 rotate-6 drop-shadow-[0_24px_18px_rgba(55,25,15,0.28)] sm:right-[38%] sm:w-28 md:bottom-[8%] md:right-[38%] md:w-36" />
+          <img decoding="async" src={assets.brownie_image} alt="Brownie artesanal" className="float-slow absolute bottom-12 right-[6%] z-20 w-36 drop-shadow-[0_30px_22px_rgba(55,25,15,0.34)] sm:right-[18%] sm:w-44 md:bottom-[25%] md:right-[12%] md:w-60 lg:w-68" />
+          <img decoding="async" src={assets.rol_image} alt="Rol de canela" className="float-delayed absolute bottom-3 right-[54%] z-10 w-28 -rotate-12 drop-shadow-[0_24px_18px_rgba(55,25,15,0.28)] sm:right-[55%] sm:w-32 md:bottom-[8%] md:right-[59%] md:w-40" />
+          <img decoding="async" src={assets.tiramisu_image} alt="Tiramisú artesanal" className="float-slow absolute bottom-3 right-[31%] z-30 w-24 rotate-6 drop-shadow-[0_24px_18px_rgba(55,25,15,0.28)] sm:right-[38%] sm:w-28 md:bottom-[8%] md:right-[38%] md:w-36" />
 
           <div className="absolute bottom-40 right-[48%] z-40 hidden rounded-2xl border border-white/50 bg-white/82 px-3 py-2 shadow-xl backdrop-blur-md sm:block sm:right-[58%] md:bottom-[72%] md:right-[8%]">
             <p className="text-[10px] font-bold uppercase tracking-[.16em] text-primary">Favorito</p>

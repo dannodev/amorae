@@ -4,7 +4,7 @@ import { assets } from "../assets/assets";
 
 const Cart = () => {
   const navigate = useNavigate();
-  const { cartItems, products, currency, addToCart, removeFromCart, updateCartItem } = useAppContext();
+  const { cartItems, products, productsLoaded, currency, addToCart, removeFromCart, updateCartItem } = useAppContext();
 
   // Filter products that are in the cart
   const cartProducts = products.filter((p) => cartItems[p._id] > 0);
@@ -14,6 +14,10 @@ const Cart = () => {
     const qty = cartItems[product._id];
     return sum + product.offerPrice * qty;
   }, 0);
+
+  if (!productsLoaded) {
+    return <div className="py-24 text-center text-stone-500">Cargando tu carrito...</div>;
+  }
 
   if (cartProducts.length === 0) {
     return (
@@ -53,7 +57,7 @@ const Cart = () => {
                   className="flex h-20 w-20 flex-shrink-0 cursor-pointer items-center justify-center rounded-xl bg-[#f5e8d7] p-2"
                   onClick={() => navigate(`/product/${product._id}`)}
                 >
-                  <img src={product.image?.[0]} alt={product.name} className="max-h-full max-w-full object-contain" />
+                  <img loading="lazy" decoding="async" src={product.image?.[0] || "/circle_logo.png"} alt={product.name} className="max-h-full max-w-full object-contain" />
                 </div>
 
                 {/* Product Info */}
@@ -80,6 +84,7 @@ const Cart = () => {
                   <div className="flex items-center border border-gray-200 rounded-lg bg-gray-50">
                     <button
                       onClick={() => removeFromCart(product._id)}
+                      aria-label={`Quitar una unidad de ${product.name}`}
                       className="px-3 py-1 font-bold text-gray-500 hover:text-primary-dull cursor-pointer"
                     >
                       -
@@ -87,7 +92,9 @@ const Cart = () => {
                     <span className="w-8 text-center text-sm font-medium text-gray-800">{qty}</span>
                     <button
                       onClick={() => addToCart(product._id)}
-                      className="px-3 py-1 font-bold text-gray-500 hover:text-primary-dull cursor-pointer"
+                      aria-label={`Agregar una unidad de ${product.name}`}
+                      disabled={product.trackInventory && qty >= product.stockQuantity}
+                      className="px-3 py-1 font-bold text-gray-500 hover:text-primary-dull cursor-pointer disabled:cursor-not-allowed disabled:opacity-35"
                     >
                       +
                     </button>

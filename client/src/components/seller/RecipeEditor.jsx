@@ -1,12 +1,17 @@
 const RecipeEditor = ({ materials, recipe, onChange, currency }) => {
-  const addIngredient = () => onChange([...recipe, { materialId: materials[0]?.id || "", quantity: "" }]);
+  const unusedMaterial = materials.find((material) => !recipe.some((ingredient) => ingredient.materialId === material.id));
+  const addIngredient = () => {
+    if (!unusedMaterial) return;
+    onChange([...recipe, { materialId: unusedMaterial.id, quantity: "" }]);
+  };
   const updateIngredient = (index, updates) => onChange(
     recipe.map((ingredient, ingredientIndex) => ingredientIndex === index ? { ...ingredient, ...updates } : ingredient)
   );
   const removeIngredient = (index) => onChange(recipe.filter((_, ingredientIndex) => ingredientIndex !== index));
   const cost = recipe.reduce((total, ingredient) => {
     const material = materials.find((item) => item.id === ingredient.materialId);
-    return total + Number(ingredient.quantity || 0) * Number(material?.costPerUnit || 0);
+    const lineCost = Number(ingredient.quantity || 0) * Number(material?.costPerUnit || 0);
+    return total + (Number.isFinite(lineCost) ? lineCost : 0);
   }, 0);
 
   return (
@@ -35,10 +40,18 @@ const RecipeEditor = ({ materials, recipe, onChange, currency }) => {
                 <div key={`${ingredient.materialId}_${index}`} className="grid gap-2 sm:grid-cols-[1fr_160px_auto]">
                   <select value={ingredient.materialId} onChange={(event) => updateIngredient(index, { materialId: event.target.value })} className="seller-input rounded-xl px-3 py-2.5 text-sm">
                     <option value="">Selecciona ingrediente</option>
-                    {materials.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    {materials.map((item) => (
+                      <option
+                        key={item.id}
+                        value={item.id}
+                        disabled={item.id !== ingredient.materialId && recipe.some((entry) => entry.materialId === item.id)}
+                      >
+                        {item.name}
+                      </option>
+                    ))}
                   </select>
                   <div className="relative">
-                    <input min="0.001" step="0.001" type="number" value={ingredient.quantity} onChange={(event) => updateIngredient(index, { quantity: event.target.value })} placeholder="Cantidad" className="seller-input w-full rounded-xl px-3 py-2.5 pr-12 text-sm" />
+                    <input min="0.001" max="1000000" step="0.001" type="number" value={ingredient.quantity} onChange={(event) => updateIngredient(index, { quantity: event.target.value })} placeholder="Cantidad" className="seller-input w-full rounded-xl px-3 py-2.5 pr-12 text-sm" />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-stone-400">{material?.unit || ""}</span>
                   </div>
                   <button type="button" onClick={() => removeIngredient(index)} aria-label={`Quitar ingrediente ${index + 1}`} className="h-10 cursor-pointer rounded-xl border border-red-100 px-4 text-sm font-bold text-red-500">Quitar</button>
@@ -46,7 +59,7 @@ const RecipeEditor = ({ materials, recipe, onChange, currency }) => {
               );
             })}
           </div>
-          <button type="button" onClick={addIngredient} className="mt-3 cursor-pointer rounded-xl bg-[#f4e8d8] px-4 py-2.5 text-xs font-bold text-primary-dull">+ Agregar ingrediente</button>
+          <button type="button" onClick={addIngredient} disabled={!unusedMaterial} className="mt-3 cursor-pointer rounded-xl bg-[#f4e8d8] px-4 py-2.5 text-xs font-bold text-primary-dull disabled:cursor-not-allowed disabled:opacity-45">+ Agregar ingrediente</button>
         </>
       )}
     </div>

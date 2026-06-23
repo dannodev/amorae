@@ -150,7 +150,7 @@ const InventoryPanel = ({
             <div key={product._id} className="seller-glass overflow-hidden rounded-[1.5rem]">
               <div className="grid items-center gap-4 p-4 sm:grid-cols-[64px_1fr_auto] md:p-5">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_50%_35%,#fff,#f0dfc9)] p-2">
-                  <img loading="lazy" src={product.image?.[0]} alt="" className="max-h-full max-w-full object-contain drop-shadow-md" />
+                  <img loading="lazy" decoding="async" src={product.image?.[0] || "/circle_logo.png"} alt="" className="max-h-full max-w-full object-contain drop-shadow-md" />
                 </div>
 
                 <div className="min-w-0">
@@ -202,6 +202,8 @@ const InventoryPanel = ({
                       <div className="grid gap-3 sm:grid-cols-[130px_1fr_auto]">
                         <input
                           type="number"
+                          min="-1000000"
+                          max="1000000"
                           value={adjustments[product._id] || ""}
                           onChange={(event) => setAdjustments((current) => ({ ...current, [product._id]: event.target.value }))}
                           placeholder="+10 o -2"
@@ -209,6 +211,7 @@ const InventoryPanel = ({
                         />
                         <input
                           type="text"
+                          maxLength={200}
                           value={reasons[product._id] || ""}
                           onChange={(event) => setReasons((current) => ({ ...current, [product._id]: event.target.value }))}
                           placeholder="Motivo: producción, merma, corrección..."
@@ -231,6 +234,7 @@ const InventoryPanel = ({
                         <input
                           type="number"
                           min="0"
+                          max="1000000"
                           defaultValue={product.lowStockThreshold}
                           onBlur={(event) => updateInventorySettings(product._id, { lowStockThreshold: event.target.value })}
                           className="seller-input mt-2 w-full rounded-xl px-4 py-2.5 text-sm font-normal normal-case tracking-normal"

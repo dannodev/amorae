@@ -69,7 +69,7 @@ const Navbar = () => {
                         <span>Buscar</span>
                     </NavLink>
 
-                    <div onClick={() => navigate("/cart")} onKeyDown={(e) => e.key === "Enter" && navigate("/cart")} role="button" tabIndex={0} className={`flex flex-col items-center gap-0.5 text-[11px] ${isActive("/cart")} hover:text-primary transition-colors relative cursor-pointer`}>
+                    <button type="button" onClick={() => navigate("/cart")} aria-label={`Abrir carrito, ${getCartCount()} productos`} className={`flex flex-col items-center gap-0.5 text-[11px] ${isActive("/cart")} hover:text-primary transition-colors relative cursor-pointer`}>
                         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="9" cy="21" r="1" />
                             <circle cx="20" cy="21" r="1" />
@@ -81,7 +81,7 @@ const Navbar = () => {
                                 {getCartCount()}
                             </span>
                         )}
-                    </div>
+                    </button>
 
                     <NavLink to="/my-orders" className={`flex flex-col items-center gap-0.5 text-[11px] ${isActive("/my-orders")} hover:text-primary transition-colors`}>
                         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

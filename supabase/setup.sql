@@ -4,8 +4,8 @@
 CREATE TABLE IF NOT EXISTS orders (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   phone_normalized TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'Recibido',
-  amount NUMERIC NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'Recibido' CHECK (status IN ('Recibido', 'Preparando', 'En Camino', 'Listo para recoger', 'Entregado')),
+  amount NUMERIC NOT NULL DEFAULT 0 CHECK (amount >= 0),
   cogs NUMERIC NOT NULL DEFAULT 0 CHECK (cogs >= 0),
   payment_method TEXT DEFAULT 'whatsapp',
   is_paid BOOLEAN DEFAULT false,
@@ -62,6 +62,8 @@ AS $$
   SELECT *
   FROM public.orders
   WHERE phone_normalized = regexp_replace(requested_phone, '\D', '', 'g')
+    AND length(regexp_replace(requested_phone, '\D', '', 'g')) BETWEEN 10 AND 15
+    AND payment_method = 'whatsapp'
   ORDER BY created_at DESC;
 $$;
 

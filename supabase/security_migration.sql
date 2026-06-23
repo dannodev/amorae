@@ -5,10 +5,25 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cogs NUMERIC NOT NULL DEFAULT 0 CHECK (cogs >= 0);
 ALTER TABLE public.orders
-  ADD COLUMN IF NOT EXISTS delivery_fee NUMERIC NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0),
+  ADD COLUMN IF NOT EXISTS delivery_fee NUMERIC NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0 AND delivery_fee <= 1000000),
   ADD COLUMN IF NOT EXISTS delivery_distance_km NUMERIC,
   ADD COLUMN IF NOT EXISTS delivery_status TEXT,
   ADD COLUMN IF NOT EXISTS delivery_notes TEXT;
+
+-- Named constraints also harden existing tables where the columns were already
+-- present before this migration. NOT VALID preserves legacy rows while enforcing
+-- the rule for every new insert/update.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orders_status_allowed') THEN
+    ALTER TABLE public.orders ADD CONSTRAINT orders_status_allowed
+      CHECK (status IN ('Recibido', 'Preparando', 'En Camino', 'Listo para recoger', 'Entregado')) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orders_delivery_fee_bounds') THEN
+    ALTER TABLE public.orders ADD CONSTRAINT orders_delivery_fee_bounds
+      CHECK (delivery_fee >= 0 AND delivery_fee <= 1000000) NOT VALID;
+  END IF;
+END $$;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS "manualCost" NUMERIC NOT NULL DEFAULT 0 CHECK ("manualCost" >= 0);
 
 DROP POLICY IF EXISTS "Anyone can read orders" ON public.orders;
@@ -64,6 +79,7 @@ AS $$
   SELECT *
   FROM public.orders
   WHERE phone_normalized = regexp_replace(requested_phone, '\D', '', 'g')
+    AND length(regexp_replace(requested_phone, '\D', '', 'g')) BETWEEN 10 AND 15
     AND payment_method = 'whatsapp'
   ORDER BY created_at DESC;
 $$;
@@ -233,6 +249,9 @@ BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Authentication required';
   END IF;
+  IF quantity_delta = 0 OR abs(quantity_delta) > 1000000 THEN
+    RAISE EXCEPTION 'Invalid inventory adjustment';
+  END IF;
 
   SELECT stock_quantity INTO previous_quantity
   FROM public.inventory
@@ -249,7 +268,7 @@ BEGIN
       updated_at = NOW();
 
   INSERT INTO public.inventory_movements (product_id, quantity_change, reason)
-  VALUES (target_product_id, resulting_quantity - previous_quantity, movement_reason);
+  VALUES (target_product_id, resulting_quantity - previous_quantity, left(COALESCE(movement_reason, 'Ajuste manual'), 200));
 
   RETURN resulting_quantity;
 END;
@@ -277,7 +296,7 @@ DECLARE
   next_unit_cost NUMERIC;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
-  IF quantity_added <= 0 OR purchase_cost < 0 THEN RAISE EXCEPTION 'Invalid purchase values'; END IF;
+  IF quantity_added <= 0 OR quantity_added > 1000000000 OR purchase_cost < 0 OR purchase_cost > 1000000000 THEN RAISE EXCEPTION 'Invalid purchase values'; END IF;
 
   SELECT * INTO current_material FROM public.raw_materials
   WHERE id = target_material_id FOR UPDATE;
@@ -294,7 +313,7 @@ BEGIN
   RETURNING * INTO current_material;
 
   INSERT INTO public.material_movements(material_id, quantity_change, reason, unit_cost, supplier, batch_code)
-  VALUES (target_material_id, quantity_added, movement_reason, purchase_cost / quantity_added, COALESCE(supplier_name, ''), COALESCE(batch_code, ''));
+  VALUES (target_material_id, quantity_added, left(COALESCE(movement_reason, 'Compra'), 200), purchase_cost / quantity_added, left(COALESCE(supplier_name, ''), 160), left(COALESCE(batch_code, ''), 120));
   RETURN current_material;
 END;
 $$;
@@ -314,6 +333,7 @@ DECLARE
   resulting_quantity NUMERIC;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF quantity_delta = 0 OR abs(quantity_delta) > 1000000000 THEN RAISE EXCEPTION 'Invalid material adjustment'; END IF;
   SELECT stock_quantity INTO previous_quantity FROM public.raw_materials
   WHERE id = target_material_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Raw material not found'; END IF;
@@ -322,7 +342,7 @@ BEGIN
   UPDATE public.raw_materials SET stock_quantity = resulting_quantity, updated_at = NOW()
   WHERE id = target_material_id;
   INSERT INTO public.material_movements(material_id, quantity_change, reason)
-  VALUES (target_material_id, resulting_quantity - previous_quantity, movement_reason);
+  VALUES (target_material_id, resulting_quantity - previous_quantity, left(COALESCE(movement_reason, 'Ajuste manual'), 200));
   RETURN resulting_quantity;
 END;
 $$;
@@ -350,12 +370,57 @@ DECLARE
   order_delivery_distance NUMERIC := NULL;
   catalog_price NUMERIC;
 BEGIN
+  IF order_payload IS NULL OR jsonb_typeof(order_payload) <> 'object'
+    OR jsonb_typeof(COALESCE(order_payload->'customer', '{}'::jsonb)) <> 'object'
+    OR jsonb_typeof(COALESCE(order_payload->'address', '{}'::jsonb)) <> 'object' THEN
+    RAISE EXCEPTION 'Order payload must contain customer and address objects';
+  END IF;
+  IF jsonb_typeof(COALESCE(order_payload->'items', '[]'::jsonb)) <> 'array' THEN
+    RAISE EXCEPTION 'Order items must be an array';
+  END IF;
   IF jsonb_array_length(COALESCE(order_payload->'items', '[]'::jsonb)) = 0 THEN
     RAISE EXCEPTION 'Order must contain at least one item';
   END IF;
+  IF jsonb_array_length(order_payload->'items') > 50 THEN
+    RAISE EXCEPTION 'Order contains too many items';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(order_payload->'items') item(value)
+    GROUP BY item.value->>'productId' HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Order contains duplicate products';
+  END IF;
+  IF length(COALESCE(order_payload->'customer'->>'firstName', '')) > 80
+    OR length(COALESCE(order_payload->'customer'->>'lastName', '')) > 100
+    OR length(COALESCE(order_payload->'address'->>'notes', '')) > 500 THEN
+    RAISE EXCEPTION 'Order contact data is too long';
+  END IF;
+  IF btrim(COALESCE(order_payload->'customer'->>'firstName', '')) = ''
+    OR btrim(COALESCE(order_payload->'customer'->>'lastName', '')) = ''
+    OR length(COALESCE(order_payload->'address'->>'street', '')) > 200
+    OR length(COALESCE(order_payload->'address'->>'colonia', '')) > 120
+    OR length(COALESCE(order_payload->'address'->>'city', '')) > 100
+    OR length(COALESCE(order_payload->'address'->>'state', '')) > 100
+    OR length(COALESCE(order_payload->'deliveryStatus', '')) > 40
+    OR length(COALESCE(order_payload->'deliveryNotes', '')) > 200 THEN
+    RAISE EXCEPTION 'Order data is missing or too long';
+  END IF;
+  IF COALESCE(order_payload->'address'->>'fulfillmentType', 'delivery') NOT IN ('delivery', 'pickup') THEN
+    RAISE EXCEPTION 'Invalid fulfillment type';
+  END IF;
+  IF order_payload->'address'->>'fulfillmentType' = 'pickup'
+    AND COALESCE(order_payload->'address'->>'pickupLocation', '') NOT IN ('Tossa Residencial', 'Río Nilo', 'Venta presencial') THEN
+    RAISE EXCEPTION 'Invalid pickup location';
+  END IF;
+  IF auth.uid() IS NULL AND order_payload->'address'->>'pickupLocation' = 'Venta presencial' THEN
+    RAISE EXCEPTION 'Invalid public pickup location';
+  END IF;
 
-  normalized_phone := regexp_replace(order_payload->>'phoneNormalized', '\D', '', 'g');
-  IF length(normalized_phone) < 10 THEN
+  normalized_phone := CASE
+    WHEN auth.uid() IS NULL THEN regexp_replace(order_payload->'customer'->>'phone', '\D', '', 'g')
+    ELSE regexp_replace(COALESCE(order_payload->>'phoneNormalized', order_payload->'customer'->>'phone'), '\D', '', 'g')
+  END;
+  IF length(normalized_phone) < 10 OR length(normalized_phone) > 15 THEN
     RAISE EXCEPTION 'A valid customer phone is required';
   END IF;
 
@@ -363,7 +428,11 @@ BEGIN
   LOOP
     IF COALESCE(order_item->>'productId', '') = ''
       OR COALESCE(order_item->>'name', '') = ''
-      OR COALESCE((order_item->>'quantity')::INTEGER, 0) <= 0 THEN
+      OR length(COALESCE(order_item->>'name', '')) > 120
+      OR length(COALESCE(order_item->>'category', '')) > 80
+      OR length(COALESCE(order_item->>'image', '')) > 1000
+      OR COALESCE((order_item->>'quantity')::INTEGER, 0) <= 0
+      OR COALESCE((order_item->>'quantity')::INTEGER, 0) > 999 THEN
       RAISE EXCEPTION 'Every order item requires a product, name, and positive quantity';
     END IF;
 
@@ -445,7 +514,7 @@ BEGIN
   order_cogs := order_cogs + manual_cogs;
 
   BEGIN
-    order_delivery_fee := GREATEST(0, COALESCE((order_payload->>'deliveryFee')::NUMERIC, 0));
+    order_delivery_fee := LEAST(1000000, GREATEST(0, COALESCE((order_payload->>'deliveryFee')::NUMERIC, 0)));
   EXCEPTION WHEN OTHERS THEN
     order_delivery_fee := 0;
   END;

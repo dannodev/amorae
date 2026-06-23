@@ -1,13 +1,18 @@
 import { useState } from "react"
-import toast from "react-hot-toast"
+
+const getWhatsAppNumber = () => {
+  const raw = import.meta.env.VITE_WHATSAPP_BUSINESS_NUMBER || "523330089383"
+  return raw.replace(/\D/g, "") || "523330089383"
+}
 
 const NewsLetter = () => {
   const [email, setEmail] = useState("")
 
   const handleSubmit = (event) => {
     event.preventDefault()
-    toast.success("¡Bienvenido a nuestro rincón dulce!")
-    setEmail("")
+    const cleanEmail = email.trim().slice(0, 254)
+    const message = `Hola Amorae, quiero recibir novedades y sabores de temporada. Mi correo es: ${cleanEmail}`
+    window.location.assign(`https://wa.me/${getWhatsAppNumber()}?text=${encodeURIComponent(message)}`)
   }
 
   return (
@@ -18,7 +23,7 @@ const NewsLetter = () => {
         <span className="section-kicker">Cartas desde el horno</span>
         <h2 className="section-title">Antojos nuevos, directo a tu correo</h2>
         <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-stone-600 md:text-base">
-          Entérate primero de sabores de temporada, cajas especiales y fechas disponibles.
+          Déjanos tu correo y abriremos WhatsApp para que confirmes personalmente tu solicitud.
         </p>
         <form onSubmit={handleSubmit} className="mx-auto mt-8 flex max-w-lg flex-col gap-3 rounded-3xl bg-white/60 p-2 shadow-sm backdrop-blur sm:flex-row sm:rounded-full">
           <input
@@ -26,11 +31,12 @@ const NewsLetter = () => {
             type="email"
             placeholder="tu@email.com"
             value={email}
+            maxLength={254}
             onChange={(event) => setEmail(event.target.value)}
             required
           />
           <button type="submit" className="btn-primary px-6 py-3 text-sm">
-            Quiero enterarme
+            Solicitar por WhatsApp
           </button>
         </form>
       </div>

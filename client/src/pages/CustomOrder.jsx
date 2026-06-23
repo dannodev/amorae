@@ -6,6 +6,10 @@ const getWhatsAppNumber = () => {
   const raw = import.meta.env.VITE_WHATSAPP_BUSINESS_NUMBER || "523330089383";
   return raw.replace(/\D/g, "") || "523330089383";
 };
+const localDateValue = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
 
 const CustomOrder = () => {
   const [form, setForm] = useState({
@@ -20,8 +24,9 @@ const CustomOrder = () => {
 
   const submit = (event) => {
     event.preventDefault();
-    if (!form.name.trim() || !form.phone.trim() || !form.details.trim()) {
-      toast.error("Completa nombre, teléfono y detalles del pedido.");
+    const normalizedPhone = form.phone.replace(/\D/g, "");
+    if (!form.name.trim() || !form.details.trim() || normalizedPhone.length < 10 || normalizedPhone.length > 15) {
+      toast.error("Completa nombre, un teléfono válido y los detalles del pedido.");
       return;
     }
     const request = saveCustomOrder(form);
@@ -48,10 +53,10 @@ const CustomOrder = () => {
         Este formulario guarda la solicitud y abre WhatsApp para confirmar detalles, tiempos y cotización.
       </p>
       <form onSubmit={submit} className="glass-card mt-8 grid gap-4 rounded-[2rem] p-6 md:grid-cols-2 md:p-8">
-        <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre" className="rounded-xl px-4 py-3" />
-        <input required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="WhatsApp" className="rounded-xl px-4 py-3" />
-        <input type="date" value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="rounded-xl px-4 py-3" />
-        <input value={form.servings} onChange={(e) => setForm({ ...form, servings: e.target.value })} placeholder="Porciones o piezas" className="rounded-xl px-4 py-3" />
+        <input required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre" className="rounded-xl px-4 py-3" />
+        <input required type="tel" inputMode="tel" maxLength={20} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="WhatsApp" className="rounded-xl px-4 py-3" />
+        <input type="date" min={localDateValue()} value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="rounded-xl px-4 py-3" />
+        <input maxLength={80} value={form.servings} onChange={(e) => setForm({ ...form, servings: e.target.value })} placeholder="Porciones o piezas" className="rounded-xl px-4 py-3" />
         <select value={form.dessertType} onChange={(e) => setForm({ ...form, dessertType: e.target.value })} className="rounded-xl px-4 py-3">
           <option>Mesa dulce</option>
           <option>Brownies personalizados</option>
@@ -59,8 +64,8 @@ const CustomOrder = () => {
           <option>Caja regalo</option>
           <option>Otro</option>
         </select>
-        <input value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })} placeholder="Presupuesto aproximado" className="rounded-xl px-4 py-3" />
-        <textarea required value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} placeholder="Describe colores, sabores, ocasión, restricciones, entrega..." className="min-h-36 rounded-xl px-4 py-3 md:col-span-2" />
+        <input maxLength={80} value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })} placeholder="Presupuesto aproximado" className="rounded-xl px-4 py-3" />
+        <textarea required maxLength={1500} value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} placeholder="Describe colores, sabores, ocasión, restricciones, entrega..." className="min-h-36 rounded-xl px-4 py-3 md:col-span-2" />
         <button className="btn-primary py-3 md:col-span-2">Enviar solicitud</button>
       </form>
     </section>

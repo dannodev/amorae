@@ -10,11 +10,13 @@ import RecipeEditor from "../components/seller/RecipeEditor";
 import SellerOpsPanel from "../components/seller/SellerOpsPanel";
 
 const STATUSES = ["Recibido", "Preparando", "En Camino", "Entregado"];
+const PICKUP_STATUSES = ["Recibido", "Preparando", "Listo para recoger", "Entregado"];
 
 const statusColors = {
   Recibido: "bg-blue-100 text-blue-800 border-blue-200",
   Preparando: "bg-yellow-100 text-yellow-800 border-yellow-200",
   "En Camino": "bg-orange-100 text-orange-800 border-orange-200",
+  "Listo para recoger": "bg-purple-100 text-purple-800 border-purple-200",
   Entregado: "bg-green-100 text-green-800 border-green-200",
 };
 
@@ -22,12 +24,19 @@ const statusDot = {
   Recibido: "bg-blue-500",
   Preparando: "bg-yellow-500",
   "En Camino": "bg-orange-500",
+  "Listo para recoger": "bg-purple-500",
   Entregado: "bg-green-500",
 };
 
 const LOCAL_AUTH_KEY = "amorae_admin_session";
 const LOCAL_AUTH_DURATION = 1000 * 60 * 60 * 4;
 const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_ATTEMPTS_KEY = "amorae_admin_login_attempts";
+const LOGIN_LOCK_KEY = "amorae_admin_login_lock";
+const LOGIN_LOCK_DURATION = 1000 * 60 * 5;
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+})[character]);
 
 const Seller = () => {
   const {
@@ -53,7 +62,20 @@ const Seller = () => {
   });
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
-  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [loginAttempts, setLoginAttempts] = useState(() => {
+    try {
+      const lockUntil = Number(sessionStorage.getItem(LOGIN_LOCK_KEY));
+      if (lockUntil > Date.now()) return MAX_LOGIN_ATTEMPTS;
+      if (lockUntil) {
+        sessionStorage.removeItem(LOGIN_LOCK_KEY);
+        sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY);
+        return 0;
+      }
+      return Math.min(MAX_LOGIN_ATTEMPTS, Math.max(0, Number(sessionStorage.getItem(LOGIN_ATTEMPTS_KEY)) || 0));
+    } catch {
+      return 0;
+    }
+  });
   const [loginPending, setLoginPending] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [orders, setOrders] = useState([]);
@@ -62,6 +84,17 @@ const Seller = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const recordFailedLogin = () => {
+    setLoginAttempts((attempts) => {
+      const next = Math.min(MAX_LOGIN_ATTEMPTS, attempts + 1);
+      try {
+        sessionStorage.setItem(LOGIN_ATTEMPTS_KEY, String(next));
+        if (next >= MAX_LOGIN_ATTEMPTS) sessionStorage.setItem(LOGIN_LOCK_KEY, String(Date.now() + LOGIN_LOCK_DURATION));
+      } catch { /* session persistence is optional */ }
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (!supabaseAuthEnabled) {
       setAuthLoading(false);
@@ -69,9 +102,13 @@ const Seller = () => {
     }
 
     let active = true;
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(({ data, error }) => {
       if (!active) return;
-      setAuthenticated(Boolean(data.session));
+      setAuthenticated(!error && Boolean(data.session));
+      setAuthLoading(false);
+    }).catch(() => {
+      if (!active) return;
+      setAuthenticated(false);
       setAuthLoading(false);
     });
 
@@ -93,15 +130,23 @@ const Seller = () => {
 
     setLoginPending(true);
     if (supabaseAuthEnabled) {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: emailInput.trim(),
-        password: passwordInput,
-      });
-      setLoginPending(false);
-      if (error) {
-        setLoginAttempts((attempts) => attempts + 1);
+      try {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: emailInput.trim(),
+          password: passwordInput,
+        });
+        if (error) throw error;
+        setLoginAttempts(0);
+        try {
+          sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY);
+          sessionStorage.removeItem(LOGIN_LOCK_KEY);
+        } catch { /* authentication already succeeded */ }
+      } catch {
+        recordFailedLogin();
         setPasswordInput("");
         toast.error("Correo o contraseña incorrectos");
+      } finally {
+        setLoginPending(false);
       }
       return;
     }
@@ -114,10 +159,14 @@ const Seller = () => {
 
     if (passwordInput === localAdminPassword) {
       setAuthenticated(true);
-      sessionStorage.setItem(LOCAL_AUTH_KEY, String(Date.now() + LOCAL_AUTH_DURATION));
+      try { sessionStorage.setItem(LOCAL_AUTH_KEY, String(Date.now() + LOCAL_AUTH_DURATION)); } catch { /* keep in-memory session */ }
       setLoginAttempts(0);
+      try {
+        sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY);
+        sessionStorage.removeItem(LOGIN_LOCK_KEY);
+      } catch { /* keep in-memory session */ }
     } else {
-      setLoginAttempts((attempts) => attempts + 1);
+      recordFailedLogin();
       setPasswordInput("");
       toast.error("Contraseña incorrecta");
     }
@@ -125,9 +174,12 @@ const Seller = () => {
   };
 
   const handleLogout = async () => {
-    if (supabaseAuthEnabled) await supabase.auth.signOut();
+    if (supabaseAuthEnabled) {
+      const { error } = await supabase.auth.signOut();
+      if (error) toast.error("No se pudo cerrar la sesión en línea");
+    }
     setAuthenticated(false);
-    sessionStorage.removeItem(LOCAL_AUTH_KEY);
+    try { sessionStorage.removeItem(LOCAL_AUTH_KEY); } catch { /* session is still cleared in memory */ }
   };
 
   const [newProduct, setNewProduct] = useState({
@@ -143,6 +195,7 @@ const Seller = () => {
     description3: "",
   });
   const [imageFile, setImageFile] = useState(null);
+  const [imageProcessing, setImageProcessing] = useState(false);
   const [newProductRecipe, setNewProductRecipe] = useState([]);
   const [editingRecipeProduct, setEditingRecipeProduct] = useState(null);
   const [editingRecipe, setEditingRecipe] = useState([]);
@@ -154,30 +207,50 @@ const Seller = () => {
   const handleImageChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (!file.type.startsWith("image/")) {
-        toast.error("Selecciona un archivo de imagen");
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+        toast.error("Usa una imagen JPG, PNG o WebP");
         e.target.value = "";
         return;
       }
-      if (file.size > 8 * 1024 * 1024) {
-        toast.error("La imagen no puede superar 8 MB");
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("La imagen no puede superar 5 MB");
         e.target.value = "";
         return;
       }
+      setImageProcessing(true);
       const reader = new FileReader();
       reader.onload = (event) => {
         const image = new Image();
         image.onload = () => {
+          if (!image.width || !image.height || image.width * image.height > 40_000_000) {
+            toast.error("La imagen tiene dimensiones demasiado grandes");
+            setImageProcessing(false);
+            return;
+          }
           const maxSize = 1200;
           const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
           const canvas = document.createElement("canvas");
           canvas.width = Math.round(image.width * scale);
           canvas.height = Math.round(image.height * scale);
-          canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+          const context = canvas.getContext("2d");
+          if (!context) {
+            toast.error("Tu navegador no pudo procesar la imagen");
+            setImageProcessing(false);
+            return;
+          }
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
           setImageFile(canvas.toDataURL("image/webp", 0.82));
+          setImageProcessing(false);
         };
-        image.onerror = () => toast.error("No se pudo procesar la imagen");
+        image.onerror = () => {
+          toast.error("No se pudo procesar la imagen");
+          setImageProcessing(false);
+        };
         image.src = event.target.result;
+      };
+      reader.onerror = () => {
+        toast.error("No se pudo leer la imagen");
+        setImageProcessing(false);
       };
       reader.readAsDataURL(file);
     }
@@ -190,6 +263,15 @@ const Seller = () => {
     const manualCost = Number(newProduct.manualCost || 0);
     const stockQuantity = Number(newProduct.stockQuantity);
     const lowStockThreshold = Number(newProduct.lowStockThreshold);
+
+    if (!newProduct.name.trim() || !newProduct.description1.trim()) {
+      toast.error("Completa el nombre y el detalle principal");
+      return;
+    }
+    if (imageProcessing) {
+      toast.error("Espera a que termine de procesarse la imagen");
+      return;
+    }
 
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(offerPrice) || offerPrice <= 0) {
       toast.error("Ingresa precios válidos mayores a 0");
@@ -214,6 +296,10 @@ const Seller = () => {
 
     const productData = {
       ...newProduct,
+      name: newProduct.name.trim(),
+      description1: newProduct.description1.trim(),
+      description2: newProduct.description2.trim(),
+      description3: newProduct.description3.trim(),
       price,
       offerPrice,
       manualCost,
@@ -286,7 +372,7 @@ const Seller = () => {
 
   const handleDeliveryFeeOverride = async (orderId, fee, reason) => {
     const updated = await updateOrderDeliveryFee(orderId, fee, reason);
-    if (!updated) return;
+    if (!updated) return false;
     setOrders((prev) => prev.map((o) => {
       if (o.id !== orderId) return o;
       return {
@@ -297,16 +383,19 @@ const Seller = () => {
       };
     }));
     toast.success("Costo de envío actualizado");
+    return true;
   };
 
   const handleSellerNoteSave = async (orderId, note) => {
     const updated = await updateOrderSellerNote(orderId, note);
-    if (!updated) return;
+    if (!updated) return false;
     setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, sellerNote: note.trim() } : o)));
     toast.success("Nota interna guardada");
+    return true;
   };
 
   const handleDeleteProduct = async (product) => {
+    if (!window.confirm(`¿Eliminar ${product.name}? Esta acción no se puede deshacer.`)) return;
     try {
       await deleteProduct(product._id);
       toast.success(`Eliminado: ${product.name}`);
@@ -317,12 +406,16 @@ const Seller = () => {
 
   const getOrderDate = (createdAt) => {
     if (!createdAt) return "";
-    if (typeof createdAt === "string") return new Date(createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    if (typeof createdAt === "string") {
+      const date = new Date(createdAt);
+      return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("es-MX", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    }
     if (createdAt?.toDate) return createdAt.toDate().toLocaleDateString("es-MX", { day: "numeric", month: "short" });
     return "";
   };
 
-  const sortedOrders = !orders || !Array.isArray(orders) ? [] : [...orders].sort((a, b) => {
+  const safeOrders = Array.isArray(orders) ? orders.filter(Boolean) : [];
+  const sortedOrders = [...safeOrders].sort((a, b) => {
     const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
     const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
     return bDate - aDate;
@@ -330,14 +423,14 @@ const Seller = () => {
 
   const statusCounts = {};
   STATUSES.forEach((s) => { statusCounts[s] = 0; });
-  orders.forEach((o) => { const st = o.status || "Recibido"; statusCounts[st] = (statusCounts[st] || 0) + 1; });
-  const deliveredRevenue = orders
+  safeOrders.forEach((o) => { const st = o.status || "Recibido"; statusCounts[st] = (statusCounts[st] || 0) + 1; });
+  const deliveredRevenue = safeOrders
     .filter((order) => order.status === "Entregado")
     .reduce((total, order) => total + Number(order.amount || 0), 0);
-  const deliveredDelivery = orders
+  const deliveredDelivery = safeOrders
     .filter((order) => order.status === "Entregado")
     .reduce((total, order) => total + (Number(order.deliveryFee) || 0), 0);
-  const deliveredCogs = orders
+  const deliveredCogs = safeOrders
     .filter((order) => order.status === "Entregado")
     .reduce((total, order) => total + Number(order.cogs || 0), 0);
   const totalExpenses = expenses.reduce((total, expense) => total + Number(expense.amount || 0), 0);
@@ -401,6 +494,7 @@ const Seller = () => {
                   <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-stone-500">Correo administrativo</label>
                   <input
                     type="email"
+                    maxLength={254}
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
                     placeholder="admin@amorae.mx"
@@ -415,6 +509,7 @@ const Seller = () => {
                 <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-stone-500">Contraseña</label>
                 <input
                   type="password"
+                  maxLength={256}
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="Tu contraseña"
@@ -425,7 +520,7 @@ const Seller = () => {
                 />
               </div>
               {loginAttempts >= MAX_LOGIN_ATTEMPTS && (
-                <p className="rounded-xl bg-red-50 px-4 py-3 text-xs text-red-700">Demasiados intentos. Recarga la página para volver a intentar.</p>
+                <p className="rounded-xl bg-red-50 px-4 py-3 text-xs text-red-700">Demasiados intentos. Espera 5 minutos antes de volver a intentar.</p>
               )}
               {!supabaseAuthEnabled && (
                 <p className="break-words rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">Modo local de desarrollo. En producción utiliza Supabase Auth.</p>
@@ -498,6 +593,9 @@ const Seller = () => {
   );
 
   const OrderCard = ({ order }) => {
+    const isPickup = order.fulfillmentType === "pickup" || order.address?.fulfillmentType === "pickup";
+    const baseStatuses = isPickup ? PICKUP_STATUSES : STATUSES;
+    const availableStatuses = baseStatuses.includes(order.status) ? baseStatuses : [order.status, ...baseStatuses].filter(Boolean);
     const whatsappPhone = formatWhatsAppPhone(order?.phone || order?.customer?.phone);
     const whatsappUrl = whatsappPhone ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(buildStatusMessage(order))}` : null;
     const reviewUrl = whatsappPhone ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(`Hola ${order?.customer?.firstName || ""}, gracias por comprar en Amorae. ¿Nos ayudas con una reseña rápida? ${window.location.origin}/review?order=${encodeURIComponent(order.id || "")}&name=${encodeURIComponent(order?.customer?.firstName || "")}`)}` : null;
@@ -528,8 +626,8 @@ const Seller = () => {
         toast.error("Ingresa un monto válido");
         return;
       }
-      await handleDeliveryFeeOverride(order.id, numericFee, feeReason.trim() || "Ajuste manual");
-      setEditingFee(false);
+      const saved = await handleDeliveryFeeOverride(order.id, numericFee, feeReason.trim() || "Ajuste manual");
+      if (saved) setEditingFee(false);
     };
 
     const openSellerNoteEditor = () => {
@@ -538,26 +636,27 @@ const Seller = () => {
     };
     const cancelSellerNoteEditor = () => setEditingSellerNote(false);
     const submitSellerNoteEditor = async () => {
-      await handleSellerNoteSave(order.id, sellerNoteDraft);
-      setEditingSellerNote(false);
+      const saved = await handleSellerNoteSave(order.id, sellerNoteDraft);
+      if (saved) setEditingSellerNote(false);
     };
     const printKitchenTicket = () => {
-      const rows = (order.items || []).map((item) => `<li><strong>${item.quantity}x</strong> ${item.product?.name || item.name}</li>`).join("");
+      const rows = (order.items || []).map((item) => `<li><strong>${escapeHtml(item.quantity)}x</strong> ${escapeHtml(item.product?.name || item.name)}</li>`).join("");
       const ticket = window.open("", "_blank", "width=420,height=640");
       if (!ticket) {
         toast.error("Permite ventanas emergentes para imprimir.");
         return;
       }
       ticket.document.write(`
-        <html><head><title>Ticket ${order.id}</title>
+        <html><head><title>Ticket ${escapeHtml(order.id)}</title>
         <style>body{font-family:Arial,sans-serif;padding:24px;color:#2b1a14}h1{font-size:24px}li{margin:8px 0}.box{border:1px solid #ddd;border-radius:12px;padding:14px;margin:12px 0}</style>
         </head><body>
         <h1>Amorae · Ticket de cocina</h1>
-        <p><strong>Pedido:</strong> ${order.id}</p>
-        <p><strong>Cliente:</strong> ${order.customer?.firstName || ""} ${order.customer?.lastName || ""}</p>
-        <p><strong>Entrega:</strong> ${order.address?.preferredDate || "Por confirmar"} ${order.address?.preferredTime || ""}</p>
+        <p><strong>Pedido:</strong> ${escapeHtml(order.id)}</p>
+        <p><strong>Cliente:</strong> ${escapeHtml(order.customer?.firstName)} ${escapeHtml(order.customer?.lastName)}</p>
+        <p><strong>${isPickup ? "Recolección" : "Entrega"}:</strong> ${escapeHtml(order.address?.preferredDate || "Por confirmar")} ${escapeHtml(order.address?.preferredTime)}</p>
+        ${isPickup ? `<p><strong>Punto:</strong> ${escapeHtml(order.pickupLocation || order.address?.pickupLocation || "Por confirmar")}</p>` : ""}
         <div class="box"><strong>Productos</strong><ul>${rows}</ul></div>
-        <div class="box"><strong>Notas</strong><p>${order.address?.notes || "Sin notas"}</p></div>
+        <div class="box"><strong>Notas</strong><p>${escapeHtml(order.address?.notes || "Sin notas")}</p></div>
         <script>window.print(); window.close();</script>
         </body></html>
       `);
@@ -587,10 +686,12 @@ const Seller = () => {
             <span className="font-medium text-gray-800">{order.customer?.phone || order.phone}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-400">Dirección</span>
-            <span className="font-medium text-gray-800 text-right max-w-[60%]">{order.address?.street}, {order.address?.colonia}</span>
+            <span className="text-gray-400">{isPickup ? "Modalidad" : "Dirección"}</span>
+            <span className="font-medium text-gray-800 text-right max-w-[60%]">
+              {isPickup ? `Recoge en ${order.pickupLocation || order.address?.pickupLocation || "Por confirmar"}` : `${order.address?.street}, ${order.address?.colonia}`}
+            </span>
           </div>
-          {hasDeliveryPin && (
+          {!isPickup && hasDeliveryPin && (
             <div className="flex justify-between">
               <span className="text-gray-400">Pin</span>
               <a
@@ -613,7 +714,7 @@ const Seller = () => {
               <span className="text-gray-600 text-right max-w-[60%]">{order.address.notes}</span>
             </div>
           )}
-          <div className="flex justify-between items-center">
+          {!isPickup && <div className="flex justify-between items-center">
             <span className="text-gray-400">Envío</span>
             <span className="font-medium text-gray-800 flex items-center gap-1.5">
               {currentDeliveryFee > 0 ? `${currency}${currentDeliveryFee.toFixed(2)}` : <span className="text-green-700">Gratis</span>}
@@ -624,11 +725,11 @@ const Seller = () => {
                 <span className="text-[10px] font-bold uppercase tracking-wider text-[#5E4B8B] bg-[#efeafc] px-1.5 py-0.5 rounded">Manual</span>
               )}
             </span>
-          </div>
-          {order.deliveryNotes && isManualFee && (
+          </div>}
+          {!isPickup && order.deliveryNotes && isManualFee && (
             <p className="text-xs text-stone-500 italic">"{order.deliveryNotes}"</p>
           )}
-          {!editingFee ? (
+          {!isPickup && (!editingFee ? (
             <button
               type="button"
               onClick={openEditor}
@@ -643,6 +744,7 @@ const Seller = () => {
                 <input
                   type="number"
                   min="0"
+                  max="1000000"
                   step="0.01"
                   value={feeDraft}
                   onChange={(event) => setFeeDraft(event.target.value)}
@@ -654,6 +756,7 @@ const Seller = () => {
                 Motivo (opcional)
                 <input
                   type="text"
+                  maxLength={200}
                   value={feeReason}
                   onChange={(event) => setFeeReason(event.target.value)}
                   placeholder="Ej. Envío por paquetería"
@@ -677,7 +780,7 @@ const Seller = () => {
                 </button>
               </div>
             </div>
-          )}
+          ))}
 
           {/* Seller-only internal note (not shown to the customer). */}
           <div className="flex items-start justify-between gap-2 pt-2 border-t border-dashed border-primary-dull/15">
@@ -685,6 +788,7 @@ const Seller = () => {
               <p className="text-[10px] font-bold uppercase tracking-wider text-stone-500">Nota interna (solo obrador)</p>
               {editingSellerNote ? (
                 <textarea
+                  maxLength={1000}
                   value={sellerNoteDraft}
                   onChange={(event) => setSellerNoteDraft(event.target.value)}
                   placeholder="Ej. entregado en recepción con María"
@@ -726,7 +830,7 @@ const Seller = () => {
           </div>
         </div>
 
-        {order.items && order.items.length > 0 && (
+        {Array.isArray(order.items) && order.items.length > 0 && (
           <div className="mb-4 space-y-1.5">
             <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide mb-2">Productos</p>
             {order.items.map((item, i) => (
@@ -764,7 +868,7 @@ const Seller = () => {
               onChange={(e) => handleStatusChange(order.id, e.target.value)}
               className="seller-input cursor-pointer rounded-xl px-3 py-2 text-xs font-semibold"
             >
-              {STATUSES.map((s) => (
+              {availableStatuses.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
@@ -905,10 +1009,10 @@ const Seller = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-                <StatCard label="Pedidos" count={orders.length} accent="#8B4A2B" note="Total registrado" />
+                <StatCard label="Pedidos" count={safeOrders.length} accent="#8B4A2B" note="Total registrado" />
                 <StatCard label="Recibidos" count={statusCounts["Recibido"] || 0} accent="#537DA5" note="Por confirmar" />
                 <StatCard label="Preparando" count={statusCounts["Preparando"] || 0} accent="#C49735" note="En cocina" />
-                <StatCard label="En camino" count={statusCounts["En Camino"] || 0} accent="#C46D3B" note="En reparto" />
+                <StatCard label="Por entregar" count={(statusCounts["En Camino"] || 0) + (statusCounts["Listo para recoger"] || 0)} accent="#C46D3B" note="En reparto o listo para recoger" />
                 <StatCard label="Ventas" count={`${currency}${deliveredRevenue.toFixed(0)}`} accent="#5E8062" note="Pedidos entregados (productos)" />
                 <StatCard label="Envíos" count={`${currency}${deliveredDelivery.toFixed(0)}`} accent="#7A6A9E" note="Tarifas de entrega cobradas" />
                 <StatCard label="Inventario" count={totalStockUnits} accent="#5E8062" note={`${lowStockProducts.length} por revisar`} />
@@ -973,20 +1077,20 @@ const Seller = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Imagen del producto</label>
                       <div className="group relative flex h-44 w-full cursor-pointer items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-primary-dull/20 bg-[#f8f1e7] transition-colors hover:border-primary">
-                        <input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer" />
+                        <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer" />
                         {imageFile ? (
                           <img src={imageFile} alt="preview" className="w-full h-full object-contain p-4" />
                         ) : (
                           <div className="text-center">
                             <img src={assets.upload_area} alt="" className="w-12 h-12 mx-auto mb-2 opacity-40 group-hover:opacity-60 transition-opacity" />
-                            <span className="text-sm text-gray-400 group-hover:text-gray-500 transition-colors">Haz clic para subir imagen</span>
+                            <span className="text-sm text-gray-400 group-hover:text-gray-500 transition-colors">{imageProcessing ? "Optimizando imagen..." : "Haz clic para subir imagen"}</span>
                           </div>
                         )}
                       </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Nombre del postre</label>
-                      <input type="text" name="name" value={newProduct.name} onChange={handleInputChange} placeholder="Ej. Brownie Triple Chocolate" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" required />
+                      <input type="text" maxLength={120} name="name" value={newProduct.name} onChange={handleInputChange} placeholder="Ej. Brownie Triple Chocolate" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" required />
                     </div>
                     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                       <div>
@@ -997,23 +1101,23 @@ const Seller = () => {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Precio</label>
-                        <input type="number" name="price" value={newProduct.price} onChange={handleInputChange} placeholder="90" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
+                        <input type="number" min="0.01" max="1000000" step="0.01" name="price" value={newProduct.price} onChange={handleInputChange} placeholder="90" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Oferta</label>
-                        <input type="number" name="offerPrice" value={newProduct.offerPrice} onChange={handleInputChange} placeholder="75" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
+                        <input type="number" min="0.01" max="1000000" step="0.01" name="offerPrice" value={newProduct.offerPrice} onChange={handleInputChange} placeholder="75" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Costo manual</label>
-                        <input type="number" min="0" step="0.01" name="manualCost" value={newProduct.manualCost} onChange={handleInputChange} placeholder="Solo sin receta" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" />
+                        <input type="number" min="0" max="1000000000" step="0.01" name="manualCost" value={newProduct.manualCost} onChange={handleInputChange} placeholder="Solo sin receta" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" />
                       </div>
                       <div>
                         <label className="mb-1.5 block text-sm font-medium text-gray-700">Stock inicial</label>
-                        <input type="number" min="0" name="stockQuantity" value={newProduct.stockQuantity} onChange={handleInputChange} placeholder="10" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
+                        <input type="number" min="0" max="1000000" name="stockQuantity" value={newProduct.stockQuantity} onChange={handleInputChange} placeholder="10" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
                       </div>
                       <div>
                         <label className="mb-1.5 block text-sm font-medium text-gray-700">Aviso en</label>
-                        <input type="number" min="0" name="lowStockThreshold" value={newProduct.lowStockThreshold} onChange={handleInputChange} placeholder="3" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
+                        <input type="number" min="0" max="1000000" name="lowStockThreshold" value={newProduct.lowStockThreshold} onChange={handleInputChange} placeholder="3" className="seller-input w-full rounded-xl px-3 py-2.5 text-sm" required />
                       </div>
                     </div>
                     <RecipeEditor
@@ -1025,13 +1129,13 @@ const Seller = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Detalles del producto</label>
                       <div className="space-y-2.5">
-                        <input type="text" name="description1" value={newProduct.description1} onChange={handleInputChange} placeholder="Ej. Chocolate 70% Cacao" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" required />
-                        <input type="text" name="description2" value={newProduct.description2} onChange={handleInputChange} placeholder="Detalle adicional (opcional)" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" />
-                        <input type="text" name="description3" value={newProduct.description3} onChange={handleInputChange} placeholder="Detalle adicional (opcional)" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" />
+                        <input type="text" maxLength={300} name="description1" value={newProduct.description1} onChange={handleInputChange} placeholder="Ej. Chocolate 70% Cacao" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" required />
+                        <input type="text" maxLength={300} name="description2" value={newProduct.description2} onChange={handleInputChange} placeholder="Detalle adicional (opcional)" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" />
+                        <input type="text" maxLength={300} name="description3" value={newProduct.description3} onChange={handleInputChange} placeholder="Detalle adicional (opcional)" className="seller-input w-full rounded-xl px-4 py-2.5 text-sm" />
                       </div>
                     </div>
                     <div className="flex items-center gap-3 pt-2">
-                      <button type="submit" className="btn-primary flex-1 cursor-pointer py-3">Guardar producto</button>
+                      <button type="submit" disabled={imageProcessing} className="btn-primary flex-1 cursor-pointer py-3 disabled:cursor-not-allowed disabled:opacity-50">Guardar producto</button>
                       <button type="button" onClick={() => setShowAddForm(false)} className="py-3 px-6 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-all cursor-pointer text-sm font-medium">Cancelar</button>
                     </div>
                   </form>
@@ -1056,8 +1160,8 @@ const Seller = () => {
                             await saveProductRecipe(editingRecipeProduct._id, editingRecipe);
                             toast.success("Receta y costo actualizados");
                             setEditingRecipeProduct(null);
-                          } catch {
-                            toast.error("No se pudo guardar la receta");
+                          } catch (error) {
+                            toast.error(error.message || "No se pudo guardar la receta");
                           }
                         }} className="btn-primary px-6 py-3 text-xs">Guardar receta</button>
                       </div>
@@ -1075,7 +1179,7 @@ const Seller = () => {
                         <div key={p._id} className="seller-card-3d seller-glass group rounded-[1.6rem] p-4">
                           <div className="relative mb-4 flex h-36 w-full items-center justify-center overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_50%_35%,#fff,#f0dfc9)] p-3">
                             <div className="absolute bottom-4 h-4 w-1/2 rounded-[50%] bg-cocoa/10 blur-md" />
-                            <img loading="lazy" src={p.image?.[0]} alt={p.name} className="relative z-10 max-h-full max-w-full object-contain drop-shadow-[0_14px_12px_rgba(64,33,22,.16)] transition-transform duration-300 group-hover:-translate-y-1 group-hover:scale-110" />
+                            <img loading="lazy" decoding="async" src={p.image?.[0] || "/circle_logo.png"} alt={p.name} className="relative z-10 max-h-full max-w-full object-contain drop-shadow-[0_14px_12px_rgba(64,33,22,.16)] transition-transform duration-300 group-hover:-translate-y-1 group-hover:scale-110" />
                           </div>
                           <p className="text-[10px] font-bold uppercase tracking-[.14em] text-primary">{p.category}</p>
                           <h3 className="font-display mt-1 truncate text-lg font-bold text-cocoa">{p.name}</h3>

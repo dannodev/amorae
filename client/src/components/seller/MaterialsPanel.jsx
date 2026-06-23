@@ -131,7 +131,7 @@ const MaterialsPanel = ({
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             <label className="xl:col-span-2 text-xs font-bold uppercase tracking-wider text-stone-500">
               Ingrediente
-              <input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Ej. Chocolate 70%" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
+              <input required maxLength={120} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Ej. Chocolate 70%" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
             </label>
             <label className="text-xs font-bold uppercase tracking-wider text-stone-500">
               Unidad
@@ -141,19 +141,19 @@ const MaterialsPanel = ({
             </label>
             <label className="text-xs font-bold uppercase tracking-wider text-stone-500">
               Cantidad
-              <input required min="0.01" step="0.01" type="number" value={form.purchaseQuantity} onChange={(event) => setForm({ ...form, purchaseQuantity: event.target.value })} placeholder="1000" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
+              <input required min="0.01" max="1000000000" step="0.01" type="number" value={form.purchaseQuantity} onChange={(event) => setForm({ ...form, purchaseQuantity: event.target.value })} placeholder="1000" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
             </label>
             <label className="text-xs font-bold uppercase tracking-wider text-stone-500">
               Costo total
-              <input required min="0" step="0.01" type="number" value={form.purchaseCost} onChange={(event) => setForm({ ...form, purchaseCost: event.target.value })} placeholder="180" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
+              <input required min="0" max="1000000000" step="0.01" type="number" value={form.purchaseCost} onChange={(event) => setForm({ ...form, purchaseCost: event.target.value })} placeholder="180" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
             </label>
             <label className="text-xs font-bold uppercase tracking-wider text-stone-500">
               Aviso en
-              <input required min="0" step="0.01" type="number" value={form.lowStockThreshold} onChange={(event) => setForm({ ...form, lowStockThreshold: event.target.value })} placeholder="200" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
+              <input required min="0" max="1000000000" step="0.01" type="number" value={form.lowStockThreshold} onChange={(event) => setForm({ ...form, lowStockThreshold: event.target.value })} placeholder="200" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
             </label>
             <label className="sm:col-span-2 xl:col-span-5 text-xs font-bold uppercase tracking-wider text-stone-500">
               Proveedor
-              <input value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} placeholder="Opcional" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
+              <input maxLength={160} value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} placeholder="Opcional" className="seller-input mt-2 w-full rounded-xl px-4 py-3 text-sm font-normal normal-case tracking-normal" />
             </label>
             <button type="submit" disabled={loading} className="btn-primary cursor-pointer self-end py-3 disabled:cursor-not-allowed disabled:opacity-50">Guardar</button>
           </div>
@@ -222,18 +222,18 @@ const MaterialsPanel = ({
                       <div>
                         <p className="mb-3 text-xs font-bold uppercase tracking-wider text-stone-500">Registrar compra</p>
                         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                          <input type="number" min="0.01" step="0.01" value={restock[material.id]?.quantity || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], quantity: event.target.value } })} placeholder={`Cantidad (${material.unit})`} className="seller-input rounded-xl px-3 py-2.5 text-sm" />
-                          <input type="number" min="0" step="0.01" value={restock[material.id]?.cost || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], cost: event.target.value } })} placeholder="Costo total" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
-                          <input value={restock[material.id]?.supplier || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], supplier: event.target.value } })} placeholder="Proveedor" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
-                          <input value={restock[material.id]?.batchCode || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], batchCode: event.target.value } })} placeholder="Lote" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
+                          <input type="number" min="0.01" max="1000000000" step="0.01" value={restock[material.id]?.quantity || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], quantity: event.target.value } })} placeholder={`Cantidad (${material.unit})`} className="seller-input rounded-xl px-3 py-2.5 text-sm" />
+                          <input type="number" min="0" max="1000000000" step="0.01" value={restock[material.id]?.cost || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], cost: event.target.value } })} placeholder="Costo total" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
+                          <input maxLength={160} value={restock[material.id]?.supplier || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], supplier: event.target.value } })} placeholder="Proveedor" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
+                          <input maxLength={120} value={restock[material.id]?.batchCode || ""} onChange={(event) => setRestock({ ...restock, [material.id]: { ...restock[material.id], batchCode: event.target.value } })} placeholder="Lote" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
                           <button type="button" onClick={() => submitRestock(material)} className="btn-primary cursor-pointer px-4 py-2.5 text-xs">Agregar compra</button>
                         </div>
                       </div>
                       <div>
                         <p className="mb-3 text-xs font-bold uppercase tracking-wider text-stone-500">Merma o corrección</p>
                         <div className="grid gap-2 sm:grid-cols-3">
-                          <input type="number" step="0.01" value={adjustment[material.id]?.quantity || ""} onChange={(event) => setAdjustment({ ...adjustment, [material.id]: { ...adjustment[material.id], quantity: event.target.value } })} placeholder="+100 o -50" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
-                          <input value={adjustment[material.id]?.reason || ""} onChange={(event) => setAdjustment({ ...adjustment, [material.id]: { ...adjustment[material.id], reason: event.target.value } })} placeholder="Motivo" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
+                          <input type="number" min="-1000000000" max="1000000000" step="0.01" value={adjustment[material.id]?.quantity || ""} onChange={(event) => setAdjustment({ ...adjustment, [material.id]: { ...adjustment[material.id], quantity: event.target.value } })} placeholder="+100 o -50" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
+                          <input maxLength={200} value={adjustment[material.id]?.reason || ""} onChange={(event) => setAdjustment({ ...adjustment, [material.id]: { ...adjustment[material.id], reason: event.target.value } })} placeholder="Motivo" className="seller-input rounded-xl px-3 py-2.5 text-sm" />
                           <button type="button" onClick={() => submitAdjustment(material)} className="cursor-pointer rounded-xl bg-cocoa px-4 py-2.5 text-xs font-bold text-white">Ajustar</button>
                         </div>
                       </div>
@@ -241,13 +241,14 @@ const MaterialsPanel = ({
                     <div className="flex flex-col gap-3 border-t border-primary-dull/8 pt-4 sm:flex-row sm:items-end">
                       <label className="flex-1 text-xs font-bold uppercase tracking-wider text-stone-500">
                         Avisar debajo de
-                        <input type="number" min="0" step="0.01" defaultValue={material.lowStockThreshold} onBlur={(event) => updateRawMaterial(material.id, { lowStockThreshold: event.target.value })} className="seller-input mt-2 w-full rounded-xl px-3 py-2.5 text-sm font-normal normal-case" />
+                        <input type="number" min="0" max="1000000000" step="0.01" defaultValue={material.lowStockThreshold} onBlur={(event) => updateRawMaterial(material.id, { lowStockThreshold: event.target.value })} className="seller-input mt-2 w-full rounded-xl px-3 py-2.5 text-sm font-normal normal-case" />
                       </label>
                       <label className="flex-1 text-xs font-bold uppercase tracking-wider text-stone-500">
                         Proveedor
-                        <input defaultValue={material.supplier} onBlur={(event) => updateRawMaterial(material.id, { supplier: event.target.value })} className="seller-input mt-2 w-full rounded-xl px-3 py-2.5 text-sm font-normal normal-case" />
+                        <input maxLength={160} defaultValue={material.supplier} onBlur={(event) => updateRawMaterial(material.id, { supplier: event.target.value })} className="seller-input mt-2 w-full rounded-xl px-3 py-2.5 text-sm font-normal normal-case" />
                       </label>
                       <button type="button" onClick={async () => {
+                        if (!window.confirm(`¿Eliminar ${material.name}? Esta acción no se puede deshacer.`)) return;
                         try {
                           await deleteRawMaterial(material.id);
                           toast.success("Materia prima eliminada");

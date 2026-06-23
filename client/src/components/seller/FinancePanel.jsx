@@ -104,7 +104,7 @@ const FinancePanel = ({
   );
 
   const updateSaleQuantity = (product, quantity) => {
-    const numericQuantity = Math.max(0, Math.floor(Number(quantity) || 0));
+    const numericQuantity = Math.min(999, Math.max(0, Math.floor(Number(quantity) || 0)));
     const safeQuantity = product.trackInventory
       ? Math.min(numericQuantity, product.stockQuantity)
       : numericQuantity;
@@ -126,6 +126,8 @@ const FinancePanel = ({
         status: "Entregado",
         isPaid: true,
         amount: saleTotal,
+        fulfillmentType: "pickup",
+        pickupLocation: "Venta presencial",
         phone: "Venta manual",
         phoneNormalized: "0000000000",
         paymentMethod: sale.paymentMethod,
@@ -135,6 +137,8 @@ const FinancePanel = ({
           phone: "Venta presencial",
         },
         address: {
+          fulfillmentType: "pickup",
+          pickupLocation: "Venta presencial",
           street: "Venta presencial",
           colonia: "",
           city: "",
@@ -145,7 +149,7 @@ const FinancePanel = ({
           productId: product._id,
           name: product.name,
           category: product.category,
-          image: product.image?.[0],
+          image: !String(product.image?.[0] || "").startsWith("data:") ? product.image?.[0] : undefined,
           offerPrice: product.offerPrice,
           quantity,
         })),
@@ -326,14 +330,14 @@ const FinancePanel = ({
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_2fr_auto]">
-            <input value={sale.customerName} onChange={(event) => setSale({ ...sale, customerName: event.target.value })} placeholder="Cliente (opcional)" className="seller-input rounded-xl px-4 py-3 text-sm" />
+            <input maxLength={80} value={sale.customerName} onChange={(event) => setSale({ ...sale, customerName: event.target.value })} placeholder="Cliente (opcional)" className="seller-input rounded-xl px-4 py-3 text-sm" />
             <select value={sale.paymentMethod} onChange={(event) => setSale({ ...sale, paymentMethod: event.target.value })} className="seller-input rounded-xl px-3 py-3 text-sm">
               <option value="cash">Efectivo</option>
               <option value="card">Tarjeta</option>
               <option value="transfer">Transferencia</option>
               <option value="other">Otro</option>
             </select>
-            <input value={sale.notes} onChange={(event) => setSale({ ...sale, notes: event.target.value })} placeholder="Nota de la venta (opcional)" className="seller-input rounded-xl px-4 py-3 text-sm" />
+            <input maxLength={500} value={sale.notes} onChange={(event) => setSale({ ...sale, notes: event.target.value })} placeholder="Nota de la venta (opcional)" className="seller-input rounded-xl px-4 py-3 text-sm" />
             <button disabled={salePending || !selectedSaleItems.length} className="btn-primary px-6 py-3 text-xs disabled:cursor-not-allowed disabled:opacity-50">
               {salePending ? "Registrando..." : "Registrar venta"}
             </button>
@@ -349,8 +353,8 @@ const FinancePanel = ({
             <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} className="seller-input rounded-xl px-3 py-3 text-sm">
               {CATEGORIES.map((category) => <option key={category}>{category}</option>)}
             </select>
-            <input required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Descripción del gasto" className="seller-input rounded-xl px-4 py-3 text-sm" />
-            <input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="Monto" className="seller-input rounded-xl px-4 py-3 text-sm" />
+            <input required maxLength={300} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Descripción del gasto" className="seller-input rounded-xl px-4 py-3 text-sm" />
+            <input required min="0.01" max="1000000000" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="Monto" className="seller-input rounded-xl px-4 py-3 text-sm" />
             <input required type="date" value={form.incurredAt} onChange={(event) => setForm({ ...form, incurredAt: event.target.value })} className="seller-input rounded-xl px-3 py-3 text-sm" />
             <button className="btn-primary cursor-pointer px-5 py-3 text-xs">Guardar</button>
           </div>
@@ -430,6 +434,7 @@ const FinancePanel = ({
                 }>{movement.type === "income" ? "+" : "−"}{money(movement.amount)}</strong>
                 {movement.expenseId && (
                   <button type="button" onClick={async () => {
+                    if (!window.confirm(`¿Eliminar el gasto "${movement.title}"?`)) return;
                     try {
                       await deleteExpense(movement.expenseId);
                       toast.success("Gasto eliminado");

@@ -12,7 +12,7 @@ const ReviewsSection = () => {
           <h2 className="section-title">Lo que dicen después de probar</h2>
         </div>
         <p className="max-w-md text-sm leading-6 text-stone-500">
-          Solo mostramos reseñas enviadas por clientes después de recibir su pedido.
+          Opiniones compartidas por clientes después de probar sus pedidos.
         </p>
       </div>
 
@@ -28,7 +28,7 @@ const ReviewsSection = () => {
         </div>
       ) : (
         <div className="mt-8 rounded-[1.75rem] border border-dashed border-primary-dull/18 bg-white/45 p-7 text-center">
-          <p className="font-display text-xl font-bold text-cocoa">Todavía estamos reuniendo reseñas verificadas.</p>
+          <p className="font-display text-xl font-bold text-cocoa">Todavía estamos reuniendo reseñas.</p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-stone-500">
             Después de entregar cada pedido, el panel de vendedor puede enviar un enlace de reseña por WhatsApp.
           </p>

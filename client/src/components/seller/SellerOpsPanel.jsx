@@ -8,7 +8,10 @@ import {
   updateCustomOrderStatus,
 } from "../../lib/businessTools";
 
-const todayKey = () => new Date().toISOString().slice(0, 10);
+const todayKey = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
 
 const SellerOpsPanel = ({ orders, products, rawMaterials, currency }) => {
   const [dateKey, setDateKey] = useState(todayKey());
@@ -20,7 +23,8 @@ const SellerOpsPanel = ({ orders, products, rawMaterials, currency }) => {
   const customers = useMemo(() => {
     const map = new Map();
     orders.forEach((order) => {
-      const phone = order.phoneNormalized || order.customer?.phone || order.phone;
+      const rawPhone = order.phoneNormalized || order.customer?.phone || order.phone;
+      const phone = String(rawPhone || "").replace(/\D/g, "");
       if (!phone || phone === "0000000000") return;
       const current = map.get(phone) || {
         name: `${order.customer?.firstName || ""} ${order.customer?.lastName || ""}`.trim() || "Cliente",
@@ -54,14 +58,19 @@ const SellerOpsPanel = ({ orders, products, rawMaterials, currency }) => {
     setItems(saveChecklist(dateKey, next));
   };
 
-  const sendLowStockAlert = () => {
+  const sendLowStockAlert = async () => {
     const lines = [
       "*Alerta de inventario Amorae*",
       ...lowStockProducts.map((p) => `• ${p.name}: ${p.stockQuantity} unidades`),
       ...lowStockMaterials.map((m) => `• ${m.name}: ${m.stockQuantity} ${m.unit}`),
     ];
-    navigator.clipboard?.writeText(lines.join("\n"));
-    toast.success("Alerta copiada. Puedes pegarla en WhatsApp o email.");
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(lines.join("\n"));
+      toast.success("Alerta copiada. Puedes pegarla en WhatsApp o email.");
+    } catch {
+      toast.error("No se pudo copiar. Revisa los permisos del navegador.");
+    }
   };
 
   const exportCustomers = () => {
@@ -143,6 +152,7 @@ const SellerOpsPanel = ({ orders, products, rawMaterials, currency }) => {
                 <strong className="text-cocoa">{request.name}</strong>
                 <select value={request.status} onChange={(e) => setCustomStatus(request.id, e.target.value)} className="seller-input rounded-lg px-2 py-1 text-xs">
                   <option>Nuevo</option>
+                  <option>Contactado</option>
                   <option>Cotizado</option>
                   <option>Confirmado</option>
                   <option>Cerrado</option>

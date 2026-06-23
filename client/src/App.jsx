@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useLayoutEffect } from 'react'
 import Navbar from './components/Navbar'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import { Toaster } from "react-hot-toast";
@@ -25,8 +25,12 @@ const PageLoader = () => (
 )
 
 const App = () => {
+  const { pathname } = useLocation();
+  const isSellerPath = pathname.startsWith("/seller");
 
-  const isSellerPath = useLocation().pathname.startsWith("/seller");
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [pathname]);
   return (
     <div className="min-h-screen overflow-x-hidden">
       {isSellerPath ? null : <Navbar/>}

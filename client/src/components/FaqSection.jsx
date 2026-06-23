@@ -25,7 +25,7 @@ const FaqSection = () => (
       <span className="section-kicker">Dudas comunes</span>
       <h2 className="section-title mx-auto">Antes de hacer tu pedido</h2>
     </div>
-    <div className="mt-8 grid gap-3 md:grid-cols-2">
+    <div className="mt-8 grid items-start gap-3 md:grid-cols-2">
       {faqs.map((item) => (
         <details key={item.q} className="glass-card group rounded-2xl p-5">
           <summary className="cursor-pointer list-none font-display text-lg font-bold text-cocoa">

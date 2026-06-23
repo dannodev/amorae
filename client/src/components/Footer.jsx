@@ -13,7 +13,7 @@ const Footer = () => {
 
   return (
     <footer className="page-shell px-5 pb-28 pt-10 sm:px-8 md:pb-10 lg:px-14 xl:px-20">
-      <div className="reveal-on-scroll overflow-hidden rounded-[2rem] border border-primary-dull/10 bg-cocoa text-white shadow-[0_24px_70px_rgba(59,36,28,0.18)] md:rounded-[2.75rem]">
+      <div className="overflow-hidden rounded-[2rem] border border-primary-dull/10 bg-cocoa text-white shadow-[0_24px_70px_rgba(59,36,28,0.18)] md:rounded-[2.75rem]">
         <div className="relative grid gap-10 px-7 py-10 sm:px-10 md:grid-cols-[1.1fr_.9fr_.9fr] md:px-12 md:py-12 lg:px-16">
           <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full border-[52px] border-white/5" />
           <div className="relative">

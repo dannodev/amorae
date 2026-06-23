@@ -22,8 +22,9 @@ const ProductCard = ({ product }) => {
         <div className="absolute inset-x-8 bottom-4 h-5 rounded-[50%] bg-cocoa/10 blur-md" />
         <img
           loading="lazy"
+          decoding="async"
           className="product-image relative z-10 h-[78%] w-[86%] object-contain drop-shadow-[0_14px_12px_rgba(64,33,22,0.15)]"
-          src={product.image?.[0]}
+          src={product.image?.[0] || "/circle_logo.png"}
           alt={product.name}
         />
       </div>
